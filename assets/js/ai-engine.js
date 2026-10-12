@@ -40,8 +40,8 @@
     for (const [key,v] of Object.entries(value)) {
       if (key==='id') id(v);
       else if (key==='type') { if (!TYPES.includes(v)) fail('不支持新增类型'); }
-      else if (BOOL.includes(key)) { if (typeof v!=='boolean') fail(key+' 必须是布尔值'); }
-      else if (NUMBERS[key]) { const [min,max,integer]=NUMBERS[key]; if (typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isInteger(v))) fail(key+' 数值超出范围'); }
+      else if (BOOL.includes(key)) { if (typeof v!=='boolean') fail(key+' 必须是布尔值（true 或 false，不带引号）'); }
+      else if (NUMBERS[key]) { const [min,max,integer]=NUMBERS[key]; if (typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isInteger(v))) fail(key+' 数值超出范围（必须为 '+min+'～'+max+' 的'+(integer?'整数':'有限数值')+'，不带引号或单位）'); }
       else if (ENUMS[key]) { if (!ENUMS[key].includes(v)) fail(key+' 枚举无效'); }
       else if (['fill','stroke','textColor','bg'].includes(key)) color(v,key);
       else if (key==='fontFamily') { if (typeof v!=='string'||! /^[\p{L}\p{N} _-]{1,80}$/u.test(v)) fail('字体名称不安全'); }
@@ -139,7 +139,7 @@
         const changes=operation.changes;
         if(Object.hasOwn(changes,'name'))string(changes.name,200,'组合名称');
         if(Object.hasOwn(changes,'autoStack')&&typeof changes.autoStack!=='boolean')fail('autoStack 必须是布尔值');
-        for(const k of ['stackX','stackY'])if(Object.hasOwn(changes,k)&&(typeof changes[k]!=='number'||!Number.isFinite(changes[k])||Math.abs(changes[k])>200))fail('组合偏移超出范围');
+        for(const k of ['stackX','stackY'])if(Object.hasOwn(changes,k)&&(typeof changes[k]!=='number'||!Number.isFinite(changes[k])||Math.abs(changes[k])>200))fail('组合偏移超出范围（'+k+' 必须为 -200～200 的有限数值）');
         let g=project.groups.find(g=>g.id===operation.id);
         if(!g){if(project.elements.some(e=>e.id===operation.id))fail('组合 ID 与元素重复');if(!Object.hasOwn(changes,'memberIds'))fail('新组合需要 memberIds');g={id:operation.id,name:'组合',memberIds:[],autoStack:false,stackX:12,stackY:12};project.groups.push(g);}
         if(Object.hasOwn(changes,'memberIds')){
@@ -196,5 +196,35 @@
     if(Object.hasOwn(snapshot,'selection'))context.selection=clone(snapshot.selection);
     return context;
   }
-  root.FlowSketchAIEngine=Object.freeze({apply,describe});
+  // Describe the same field rules used by validation, for prompts and tool schemas.
+  function contract() {
+    const identifier={type:'string',minLength:1,maxLength:80,pattern:'^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$',not:{enum:['__proto__','constructor','prototype']}};
+    const hex={type:'string',pattern:'^#[0-9a-fA-F]{6}$'};
+    const object=properties=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
+    const pointSchema=object({x:{type:'number',minimum:-100000,maximum:100000},y:{type:'number',minimum:-100000,maximum:100000}});
+    const cornerSchema=object(Object.fromEntries(['tl','tr','bl','br'].map(k=>[k,hex])));
+    const fields={id:identifier,type:{type:'string',enum:TYPES.slice()}};
+    BOOL.forEach(k=>fields[k]={type:'boolean'});
+    Object.entries(NUMBERS).forEach(([k,[min,max,integer]])=>fields[k]={type:integer?'integer':'number',minimum:min,maximum:max});
+    Object.entries(ENUMS).forEach(([k,values])=>fields[k]={type:'string',enum:values.slice()});
+    ['fill','stroke','textColor','bg'].forEach(k=>fields[k]={type:'string',pattern:'^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|transparent)$'});
+    fields.fontFamily={type:'string',minLength:1,maxLength:80,description:'只能包含字母、数字、空格、下划线、横线；默认 HarmonyOS Sans SC'};
+    ['text','latex'].forEach(k=>fields[k]={type:'string',maxLength:10000});
+    ['fromId','toId'].forEach(k=>fields[k]={anyOf:[identifier,{type:'null'}]});
+    ['formulaTemplateId','formulaValues'].forEach(k=>fields[k]={type:'null'});
+    fields.gradientColors=cornerSchema;
+    fields.gradientLayers={type:'array',minItems:1,maxItems:20,items:cornerSchema};
+    fields.cellColors={type:'array',minItems:1,maxItems:10000,items:hex};
+    fields.routePoints={type:'array',maxItems:100,items:pointSchema};
+    fields.curveControls={anyOf:[object({from:pointSchema,to:pointSchema}),{type:'null'}]};
+    fields.colorChannels={type:'array',minItems:1,maxItems:6,uniqueItems:true,items:{type:'string',enum:['r','g','b','a','color','gray']}};
+    return {
+      addTypes:TYPES.slice(),
+      elementFields:Object.fromEntries([...TYPES,'image','group'].map(type=>[type,[...new Set(allowed(type))]])),
+      fields,canvasFields:CANVAS.slice(),
+      groupFields:{name:{type:'string',maxLength:200},memberIds:{type:'array',maxItems:500,uniqueItems:true,items:identifier},autoStack:{type:'boolean'},stackX:{type:'number',minimum:-200,maximum:200},stackY:{type:'number',minimum:-200,maximum:200}},
+      operationFields:{add:['op','element'],update:['op','id','changes'],delete:['op','id'],canvas:['op','changes'],rename:['op','name'],clear:['op'],group:['op','id','changes'],ungroup:['op','id']}
+    };
+  }
+  root.FlowSketchAIEngine=Object.freeze({apply,describe,contract});
 })(typeof window==='undefined'?globalThis:window);

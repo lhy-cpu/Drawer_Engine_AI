@@ -8,7 +8,7 @@ function client(fetch) {
   vm.runInNewContext(source, context);
   return context.window.FlowSketchAIClient;
 }
-const config = { apiUrl: 'https://api.example/v1', key: 'secret-key', model: 'model', stream: false, mode: 'text' };
+const config = { apiUrl: 'https://api.example/v1', key: 'secret-key', model: 'model', stream: false, mode: 'text', timeoutSeconds: 600, historyTurns: 100 };
 function request(api, overrides = {}) { return api.complete({ config: { ...config, ...overrides.config }, messages: [], ...overrides }); }
 function wire(content = '你好', finish = 'stop', toolCalls) {
   return { choices: [{ message: { role: 'assistant', content, ...(toolCalls ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }] };
@@ -49,6 +49,8 @@ test('JSON result and safe fetch options, tool mode gated', async () => {
   assert.equal(seen[0].headers.Authorization, 'Bearer secret-key');
   assert.equal(JSON.parse(seen[0].body).stream, false);
   assert.equal('tools' in JSON.parse(seen[0].body), false);
+  assert.equal('timeoutSeconds' in JSON.parse(seen[0].body), false);
+  assert.equal('historyTurns' in JSON.parse(seen[0].body), false);
   const tools = [{ type: 'function', function: { name: 'draw' } }];
   await api.complete({ config: { ...config, mode: 'tools', key: '' }, messages: [], tools });
   assert.deepEqual(JSON.parse(seen[1].body).tools, tools);

@@ -72,6 +72,10 @@
           <label for="aiUrl">API URL</label><input class="field" id="aiUrl" type="url" placeholder="https://api.example.com/v1/chat/completions" autocomplete="off" spellcheck="false">
           <label for="aiKey">API Key</label><div class="ai-key-row"><input class="field" id="aiKey" type="password" placeholder="sk-…（本地接口可留空）" autocomplete="off" spellcheck="false"><button class="btn" id="aiShowKey" aria-label="显示 API Key">显示</button></div>
           <label for="aiModel">模型名</label><input class="field" id="aiModel" placeholder="填写接口提供的模型 ID" autocomplete="off" spellcheck="false">
+          <label for="aiTimeout">请求超时（秒）</label><input class="field" id="aiTimeout" type="number" min="10" max="3600" step="1" value="180" aria-describedby="aiTimeoutHint">
+          <p id="aiTimeoutHint" class="ai-privacy">本次发送的总时限，包含工具调用的多轮请求；默认 180 秒，可设置 10–3600 秒。</p>
+          <label for="aiHistory">上下文轮数</label><input class="field" id="aiHistory" type="number" min="1" max="100" step="1" value="24" aria-describedby="aiHistoryHint">
+          <p id="aiHistoryHint" class="ai-privacy">默认发送最近 24 轮，可设置 1–100 轮，本次发送也计入。1 轮包含用户输入、AI 回复和该轮工具调用；当前页面最多保留 100 轮，调大后可恢复仍保留的历史。更多上下文会增加请求大小与模型用量。</p>
           <label for="aiMode">修改方式</label><select class="field" id="aiMode"><option value="json">通用模式 · 结构化指令</option><option value="tools">工具调用 · 模型需支持 tools</option></select>
           <div class="ai-options"><label class="check"><input id="aiVision" type="checkbox"> 模型支持图片输入</label><label class="check"><input id="aiStream" type="checkbox" checked> 流式回复</label></div>
           <p class="ai-privacy">设置仅保存在此浏览器，不发送给网页服务器。对话时，文字、画布结构和你附加的图片会直接发送到所填 API；Key 仅用于该接口的鉴权。接口需允许浏览器跨域请求（CORS）。</p>
@@ -450,6 +454,7 @@
   };
 })();
 </script>
+<script src="assets/js/ai-prompts.js"></script>
 <script src="assets/js/ai.js"></script>
 </body>
 </html>
