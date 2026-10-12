@@ -66,6 +66,7 @@
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let bytes = 0;
     let completed = false;
+    let semanticEnd = false;
     try {
       for (;;) {
         const part = await reader.read();
@@ -74,14 +75,20 @@
         if (bytes > RESPONSE_LIMIT) throw fail('API 响应超过 2MB 限制。');
         let text;
         try { text = decoder.decode(part.value, { stream: true }); } catch (_) { throw fail('API 响应不是有效的 UTF-8 文本。'); }
-        onChunk(text);
+        // The consumer inspects the whole decoded chunk before signalling its
+        // protocol terminator. SSE completion need not close the HTTP body.
+        if (onChunk(text) === true) { semanticEnd = true; break; }
       }
       let tail;
       try { tail = decoder.decode(); } catch (_) { throw fail('API 响应包含不完整的 UTF-8 文本。'); }
       onChunk(tail);
       completed = true;
     } finally {
-      if (!completed) { try { await reader.cancel(); } catch (_) { /* preserve the original error */ } }
+      if (semanticEnd || !completed) {
+        // Cancellation can itself wait on a persistent transport. Initiate it
+        // without making the completed response depend on its cleanup promise.
+        try { Promise.resolve(reader.cancel()).catch(() => {}); } catch (_) { /* preserve the original error */ }
+      }
       reader.releaseLock();
     }
   }
@@ -184,6 +191,7 @@
         start = i + 1;
       }
       buffer = buffer.slice(start);
+      return done;
     });
     if (buffer) line(buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer);
     dispatch();
@@ -200,16 +208,23 @@
     if (config.key) headers.Authorization = 'Bearer ' + config.key;
     const body = { model: config.model, messages, stream: !!config.stream };
     if (config.mode === 'tools') { body.tools = tools || []; body.tool_choice = 'auto'; }
+    let responseReceived = false;
     try {
       const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal,
         credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error' });
+      responseReceived = true;
       if (!response.ok) throw httpError(response.status);
       return await (config.stream ? readSSE(response, onDelta) : readJSON(response));
     } catch (error) {
       if ((signal && signal.aborted) || (error && error.name === 'AbortError')) throw fail('API 请求已取消或超时。');
       // Only our fixed, local messages are shown; network/server errors may contain credentials.
       if (error && localErrors.has(error)) throw error;
-      throw fail('API 连接失败，请检查网络、跨域许可及服务地址。');
+      if (!responseReceived) {
+        const connectionError = fail('浏览器无法连接 API；可能是 API 供应商或其网关未允许跨域（CORS）。请联系供应商，允许当前网页来源、Content-Type / Authorization 请求头及 OPTIONS 预检；同时检查网络、API 地址和 HTTPS 配置。');
+        connectionError.code = 'NETWORK_OR_CORS';
+        throw connectionError;
+      }
+      throw fail('API 响应读取中断，未执行任何操作。请检查网络连接或联系 API 供应商。');
     }
   }
 

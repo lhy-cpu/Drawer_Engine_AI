@@ -26,6 +26,23 @@ function stream(text, sizes = [1]) {
 }
 function streamRequest(api, options = {}) { return api.complete({ config: { ...config, stream: true }, messages: [], ...options }); }
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
+function persistentStream(payload) {
+  let cancelled = false;
+  const bytes = typeof payload === 'string' ? new TextEncoder().encode(payload) : payload;
+  const response = new Response(new ReadableStream({
+    start(controller) { controller.enqueue(bytes); },
+    cancel() { cancelled = true; return new Promise(() => {}); },
+  }), { headers: { 'Content-Type': 'text/event-stream' } });
+  return { response, get cancelled() { return cancelled; } };
+}
+async function promptly(promise) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Completion waited for transport EOF or cancellation')), 1000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 test('endpoint normalization and prohibited components', () => {
   const api = client();
@@ -86,13 +103,52 @@ test('SSE indexed tool fragments aggregate in index order and only content calls
   assert.deepEqual(deltas, []);
 });
 
+test('SSE DONE completes and cancels a persistent body without waiting for cleanup', async () => {
+  const connection = persistentStream(event({ content: '完成' }) + event({}, 'stop') + 'data: [DONE]\n\n: keepalive\n');
+  const result = await promptly(streamRequest(client(async () => connection.response)));
+  assert.deepEqual(plain(result), { role: 'assistant', content: '完成' });
+  assert.equal(connection.cancelled, true);
+  assert.equal(connection.response.body.locked, false);
+});
+
+test('persistent SSE still rejects invalid finishes and buffered data after DONE', async () => {
+  const done = 'data: [DONE]\n\n';
+  for (const [payload, message] of [
+    [event({ content: 'partial' }) + done, /缺少结束标记/],
+    [event({}, 'length') + done, /长度限制/],
+    [event({}, 'content_filter') + done, /内容过滤/],
+    [event({}, 'tool_calls') + done, /工具调用缺失/],
+    [event({ tool_calls: [{ index: 0, function: { name: 'draw', arguments: '{}' } }] }, 'tool_calls') + done, /工具调用不完整/],
+    [event({}, 'stop') + done + 'data: {}\n\n', /结束标记之后/],
+    [event({}, 'stop') + done + 'data: {', /结束标记之后/],
+    [event({}, 'stop') + done + 'event: error', /错误事件/],
+  ]) {
+    const connection = persistentStream(payload);
+    await assert.rejects(promptly(streamRequest(client(async () => connection.response))), message);
+    assert.equal(connection.cancelled, true);
+    assert.equal(connection.response.body.locked, false);
+  }
+});
+
+test('persistent SSE validates UTF-8 and byte limit of the complete buffered chunk', async () => {
+  const prefix = new TextEncoder().encode(event({}, 'stop') + 'data: [DONE]\n\n');
+  const partialUTF8 = new Uint8Array(prefix.length + 1);
+  partialUTF8.set(prefix); partialUTF8[prefix.length] = 0xe4;
+  const invalid = persistentStream(partialUTF8);
+  await assert.rejects(promptly(streamRequest(client(async () => invalid.response))), /不完整的 UTF-8/);
+  assert.equal(invalid.cancelled, true);
+  const oversized = persistentStream(event({}, 'stop') + 'data: [DONE]\n\n:' + 'x'.repeat(2 * 1024 * 1024));
+  await assert.rejects(promptly(streamRequest(client(async () => oversized.response))), /2MB/);
+  assert.equal(oversized.cancelled, true);
+});
+
 test('rejects truncated SSE, errors and malformed protocol', async () => {
   for (const payload of [event({ content: 'partial' }), event({}, 'stop'), event({}) + 'data: [DONE]\n\n',
     'data: {"error":{"message":"secret-key"}}\n\n', 'event: error\ndata: {}\n\n', 'data: invalid\n\n',
     event({}, 'length') + 'data: [DONE]\n\n', event({}, 'content_filter') + 'data: [DONE]\n\n',
     event({ tool_calls: [{ index: 0, function: { name: 'draw', arguments: '{}' } }] }, 'tool_calls') + 'data: [DONE]\n\n',
     event({ tool_calls: [{ index: 100 }] }), event({}, 'stop') + 'data: [DONE]\n\ndata: {}\n\n',
-  ]) await assert.rejects(streamRequest(client(async () => stream(payload))), (error) => !error.message.includes('secret-key'));
+  ]) await assert.rejects(streamRequest(client(async () => stream(payload, [65536]))), (error) => !error.message.includes('secret-key'));
 });
 
 test('rejects malformed JSON and interrupted completion reasons', async () => {
@@ -108,10 +164,42 @@ test('HTTP and network failures never echo credentials', async () => {
   await assert.rejects(request(client(async () => { throw new Error('API secret-key connection error'); })), (error) => !error.message.includes('secret-key'));
 });
 
+test('initial fetch failure promptly explains possible CORS and supplier configuration safely', async () => {
+  const api = client(async () => { throw new TypeError('Failed to fetch secret-key https://private.example/?token=private'); });
+  await assert.rejects(promptly(request(api)), (error) => {
+    assert.equal(error.code, 'NETWORK_OR_CORS');
+    for (const text of ['可能', 'CORS', '供应商', '当前网页来源', 'Content-Type', 'Authorization', 'OPTIONS', '网络', 'HTTPS']) assert.ok(error.message.includes(text));
+    assert.equal(error.message.includes('secret-key'), false);
+    assert.equal(error.message.includes('private'), false);
+    assert.equal(error.message.includes('Failed to fetch'), false);
+    return true;
+  });
+});
+
+test('transport failure while reading a response is not presented as CORS', async () => {
+  for (const streaming of [false, true]) {
+    const api = client(async () => new Response(new ReadableStream({
+      start(controller) { controller.error(new TypeError('secret-key private upstream error')); },
+    })));
+    await assert.rejects(request(api, { config: { ...config, stream: streaming } }), (error) => {
+      assert.match(error.message, /响应读取中断/);
+      assert.equal(error.code, undefined);
+      assert.equal(error.message.includes('CORS'), false);
+      assert.equal(error.message.includes('secret-key'), false);
+      return true;
+    });
+  }
+});
+
 test('abort signal forwarded and cancellation has safe message', async () => {
   const controller = new AbortController(); controller.abort();
   const api = client(async (_, options) => { assert.equal(options.signal, controller.signal); throw new DOMException('secret-key', 'AbortError'); });
-  await assert.rejects(request(api, { signal: controller.signal }), /已取消或超时/);
+  await assert.rejects(request(api, { signal: controller.signal }), (error) => {
+    assert.match(error.message, /已取消或超时/);
+    assert.equal(error.code, undefined);
+    assert.equal(error.message.includes('CORS'), false);
+    return true;
+  });
 });
 
 test('response and tool argument size limits', async () => {

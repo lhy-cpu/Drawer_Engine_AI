@@ -1,13 +1,13 @@
 (function (root) {
   'use strict';
-  const TYPES = ['basicShape', 'text', 'note', 'token', 'tokenGrid', 'formula', 'connector'];
+  const TYPES = ['basicShape', 'text', 'note', 'token', 'tokenGrid', 'formula', 'connector', 'image'];
   const SHAPES = ['rect', 'ellipse', 'diamond', 'triangle', 'rightTriangle', 'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'star5', 'heart', 'cross', 'foldedRect', 'arrowRight', 'arrowLeft', 'arrowUp', 'arrowDown', 'arrowBoth', 'chevron', 'notchedArrow', 'braceLeft', 'braceRight'];
   const COMMON = ['x', 'y', 'w', 'h', 'rotation', 'opacity', 'visible', 'locked', 'text', 'fontSize', 'fontWeight', 'fontFamily', 'textColor', 'fill', 'stroke', 'strokeWidth', 'radius', 'align', 'vAlign', 'textOffsetX', 'textOffsetY', 'padding', 'dash', 'shadow', 'italic', 'colorMode', 'gradientColors'];
   const GRID = ['rows', 'cols', 'depthCount', 'cellW', 'cellH', 'gapX', 'gapY', 'extrude', 'stackX', 'stackY', 'token3d', 'colorMode', 'colorChannels', 'cellColors', 'cellColorIndex', 'gradientEditLayer', 'gradientLayers'];
   const CONNECTOR = ['x', 'y', 'fromX', 'fromY', 'toX', 'toY', 'fromId', 'toId', 'fromSide', 'toSide', 'route', 'stroke', 'strokeWidth', 'dash', 'arrowEnd', 'arrowStart', 'visible', 'locked', 'routeBias', 'routePoints', 'curveControls', 'curveControlVersion', 'arrowStartStyle', 'arrowEndStyle'];
   const CANVAS = ['width', 'height', 'bg', 'grid', 'gridSize', 'snap', 'theme'];
-  const BOOL = ['visible', 'locked', 'dash', 'shadow', 'token3d', 'arrowEnd', 'arrowStart', 'grid', 'snap', 'italic', 'displayMode'];
-  const NUMBERS = {x:[-100000,100000],y:[-100000,100000],w:[1,20000],h:[1,20000],rotation:[-360,360],opacity:[0,1],fontSize:[8,200],fontWeight:[100,900,true],strokeWidth:[0,30],radius:[0,10000],padding:[0,1000],textOffsetX:[-20000,20000],textOffsetY:[-20000,20000],fromX:[-100000,100000],fromY:[-100000,100000],toX:[-100000,100000],toY:[-100000,100000],rows:[1,100,true],cols:[1,100,true],depthCount:[1,20,true],cellW:[4,200],cellH:[4,200],gapX:[0,200],gapY:[0,200],extrude:[0,200],stackX:[0,200],stackY:[0,200],width:[200,6000],height:[200,6000],gridSize:[5,100,true],theme:[0,119,true],cellColorIndex:[0,9999,true],gradientEditLayer:[0,19,true],curveControlVersion:[2,2,true]};
+  const BOOL = ['visible', 'locked', 'dash', 'shadow', 'token3d', 'arrowEnd', 'arrowStart', 'grid', 'snap', 'italic', 'displayMode', 'flipX', 'flipY'];
+  const NUMBERS = {x:[-100000,100000],y:[-100000,100000],w:[1,20000],h:[1,20000],rotation:[-360,360],opacity:[0,1],fontSize:[8,200],fontWeight:[100,900,true],strokeWidth:[0,30],radius:[0,10000],padding:[0,1000],textOffsetX:[-20000,20000],textOffsetY:[-20000,20000],fromX:[-100000,100000],fromY:[-100000,100000],toX:[-100000,100000],toY:[-100000,100000],rows:[1,100,true],cols:[1,100,true],depthCount:[1,20,true],cellW:[4,200],cellH:[4,200],gapX:[0,200],gapY:[0,200],extrude:[0,200],stackX:[0,200],stackY:[0,200],width:[200,6000],height:[200,6000],gridSize:[5,100,true],theme:[0,119,true],cellColorIndex:[0,9999,true],gradientEditLayer:[0,19,true],curveControlVersion:[2,2,true],colorTolerance:[0,255,true]};
   const ENUMS = {shapeKind:SHAPES,align:['left','center','right'],vAlign:['top','center','bottom'],route:['straight','orthogonal','curve'],fromSide:['left','right','top','bottom'],toSide:['left','right','top','bottom'],fit:['cover','contain'],colorMode:['solid','cells','gradient'],routeBias:['horizontal','vertical'],arrowStartStyle:['none','triangle','stealth','open','diamond','circle'],arrowEndStyle:['none','triangle','stealth','open','diamond','circle']};
   const fail = message => { throw new Error('AI 编辑无效：' + message); };
   function record(value, label) {
@@ -38,7 +38,9 @@
   function validateFields(value, allowed) {
     keys(value,allowed,'元素/画布');
     for (const [key,v] of Object.entries(value)) {
-      if (key==='id') id(v);
+      if (key==='id'||key==='assetId') id(v);
+      else if (key==='crop') crop(v);
+      else if (key==='transparentColor') { if(v!==null)color(v,'transparentColor',true); }
       else if (key==='type') { if (!TYPES.includes(v)) fail('不支持新增类型'); }
       else if (BOOL.includes(key)) { if (typeof v!=='boolean') fail(key+' 必须是布尔值（true 或 false，不带引号）'); }
       else if (NUMBERS[key]) { const [min,max,integer]=NUMBERS[key]; if (typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isInteger(v))) fail(key+' 数值超出范围（必须为 '+min+'～'+max+' 的'+(integer?'整数':'有限数值')+'，不带引号或单位）'); }
@@ -60,7 +62,24 @@
   function allowed(type) {
     if(type==='connector')return CONNECTOR;
     if(type==='formula')return ['x','y','w','h','rotation','opacity','visible','locked','fontSize','textColor','latex','displayMode','formulaTemplateId','formulaValues'];
-    return [...COMMON.filter(k=>(!['text','image'].includes(type)||!['colorMode','gradientColors'].includes(k))&&(type!=='tokenGrid'||k!=='gradientColors')),...(type==='basicShape'?['shapeKind']:[]),...(type==='tokenGrid'?GRID.filter(k=>k!=='gradientColors'):[]),...(type==='image'?['fit']:[])];
+    return [...COMMON.filter(k=>(!['text','image'].includes(type)||!['colorMode','gradientColors'].includes(k))&&(type!=='tokenGrid'||k!=='gradientColors')),...(type==='basicShape'?['shapeKind']:[]),...(type==='tokenGrid'?GRID.filter(k=>k!=='gradientColors'):[]),...(type==='image'?['fit','crop','flipX','flipY','transparentColor','colorTolerance']:[])];
+  }
+  function crop(value) {
+    if(value===null)return;
+    keys(value,['x','y','w','h'],'图片裁切');
+    if(Object.keys(value).length!==4)fail('图片裁切必须包含 x/y/w/h');
+    for(const key of ['x','y','w','h'])if(typeof value[key]!=='number'||!Number.isFinite(value[key])||value[key]<0||value[key]>1||(['w','h'].includes(key)&&value[key]===0))fail('图片裁切数值必须在 0..1，宽高大于 0');
+    if(value.x+value.w>1+1e-9||value.y+value.h>1+1e-9)fail('图片裁切超出源图范围');
+  }
+  function imageAsset(assets,assetId) {
+    id(assetId);record(assets,'图片资源表');
+    if(!Object.hasOwn(assets,assetId))fail('图片资源不存在：'+assetId);
+    const asset=assets[assetId];keys(asset,['src','name','width','height'],'图片资源');
+    if(typeof asset.src!=='string'||asset.src.length>20*1024*1024||!/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(asset.src))fail('图片资源必须是预算内的本地栅格 data URL');
+    const encoded=asset.src.slice(asset.src.indexOf(',')+1);if(encoded.length%4!==0)fail('图片资源 base64 编码无效');
+    for(const k of ['width','height'])if(typeof asset[k]!=='number'||!Number.isInteger(asset[k])||asset[k]<1||asset[k]>100000)fail('图片资源尺寸无效');
+    if(Object.hasOwn(asset,'name'))string(asset.name,200,'图片名称');
+    return asset;
   }
   function validateElement(e) {
     if(e.type!=='tokenGrid'&&e.type!=='connector'&&e.colorMode&&!['solid','gradient'].includes(e.colorMode))fail('普通元素颜色模式无效');
@@ -81,6 +100,7 @@
     if(type==='group') Object.assign(e,{text:'分组标题',w:420,h:250,fill:'#ffffff',opacity:.65,radius:20,dash:true,shadow:false});
     if(type==='token') Object.assign(e,{text:'Token',w:64,h:42,radius:2,fill:'#165d9c',textColor:'#fff'});
     if(type==='tokenGrid') Object.assign(e,{rows:1,cols:8,depthCount:1,cellW:28,cellH:28,gapX:8,gapY:8,extrude:10,stackX:12,stackY:12,radius:2,text:'',token3d:false,shadow:false,colorMode:'solid',colorChannels:['color']});
+    if(type==='image') Object.assign(e,{text:'',transparentColor:null,colorTolerance:24,crop:null,flipX:false,flipY:false,fit:'contain',fill:'transparent',stroke:'transparent',strokeWidth:0,shadow:false});
     if(type==='formula') Object.assign(e,{text:'',latex:'\\frac{a}{b}',displayMode:true,formulaTemplateId:null,formulaValues:null,w:220,h:90,fontSize:32,fill:'transparent',stroke:'transparent',strokeWidth:0,shadow:false});
     if(type==='connector') return {type,x:0,y:0,fromX:80,fromY:80,toX:280,toY:80,route:'orthogonal',routeBias:'horizontal',routePoints:[],curveControls:null,arrowStartStyle:'none',arrowEndStyle:'triangle',stroke:'#0b2d5c',strokeWidth:2,dash:false,arrowEnd:true,arrowStart:false,visible:true,locked:false};
     return e;
@@ -92,22 +112,30 @@
     const angle=(target.rotation||0)*Math.PI/180,cx=target.x+target.w/2,cy=target.y+target.h/2;for(const p of Object.values(anchors)){const dx=p.x-cx,dy=p.y-cy;p.x=cx+dx*Math.cos(angle)-dy*Math.sin(angle);p.y=cy+dx*Math.sin(angle)+dy*Math.cos(angle);}
     return anchors[connector[key+'Side']] || Object.values(anchors).sort((a,b)=>(a.x-connector[key+'X'])**2+(a.y-connector[key+'Y'])**2-(b.x-connector[key+'X'])**2-(b.y-connector[key+'Y'])**2)[0];
   }
-  function apply(snapshot, operations) {
+  function apply(snapshot, operations, assets={}) {
     if (!snapshot||!Array.isArray(snapshot.elements)||!snapshot.canvas) fail('项目结构无效');
     if (!Array.isArray(operations)||operations.length<1||operations.length>100) fail('操作数必须为 1 到 100');
     list(operations,100,'操作');
     const project=clone(snapshot), initialCount=project.elements.length, initialBudget=budget(project.elements), touched=new Set();
     if(!Array.isArray(project.groups))project.groups=[];
-    const stacked=new Set();
+    const stacked=new Set();let addedImageBytes=0;
     for (const operation of operations) {
       record(operation,'操作');
       const fields={add:['op','element'],update:['op','id','changes'],delete:['op','id'],canvas:['op','changes'],rename:['op','name'],clear:['op'],group:['op','id','changes'],ungroup:['op','id']}[operation.op];
       if (!Array.isArray(fields)) fail('未知操作'); keys(operation,fields,'操作');
       if (operation.op==='add') {
         record(operation.element,'新增元素'); const {type}=operation.element;
-        validateFields(operation.element,['id','type',...allowed(type)]); id(operation.element.id);
+        validateFields(operation.element,['id','type',...allowed(type),...(type==='image'?['assetId']:[])]); id(operation.element.id);
         if(!TYPES.includes(type)||project.elements.some(e=>e.id===operation.element.id)||project.groups.some(g=>g.id===operation.element.id)) fail('类型无效或 ID 重复');
         const e=Object.assign(defaults(type),clone(operation.element));
+        if(type==='image') {
+          const asset=imageAsset(assets,operation.element.assetId);
+          addedImageBytes+=asset.src.length;if(addedImageBytes>50*1024*1024)fail('新增图片总量超过预算');
+          delete e.assetId;e.src=asset.src;e.imageWidth=asset.width;e.imageHeight=asset.height;
+          const scale=Math.min(1,320/asset.width,240/asset.height,project.canvas.width/asset.width,project.canvas.height/asset.height);
+          if(!Object.hasOwn(operation.element,'w'))e.w=Math.max(1,asset.width*scale);
+          if(!Object.hasOwn(operation.element,'h'))e.h=Math.max(1,asset.height*scale);
+        }
         if(type==='basicShape') {
           if(['ellipse','diamond','triangle','rightTriangle','pentagon','hexagon','star5','heart','cross'].includes(e.shapeKind)) { if(!Object.hasOwn(operation.element,'w'))e.w=120;if(!Object.hasOwn(operation.element,'h'))e.h=100; }
           if(!Object.hasOwn(operation.element,'text')&&['arrowRight','arrowLeft','arrowUp','arrowDown','arrowBoth','chevron','notchedArrow'].includes(e.shapeKind)) e.text='箭头文字';
@@ -188,7 +216,7 @@
     const context={name:snapshot.name,canvas:clone(snapshot.canvas),elements:snapshot.elements.map(e=>{
       const out={id:e.id,type:e.type};if(Object.hasOwn(e,'groupId'))out.groupId=e.groupId;for(const key of allowed(e.type).filter(k=>!['formulaTemplateId','formulaValues'].includes(k))) if(Object.hasOwn(e,key))out[key]=clone(e[key]);
       if(e.type==='tokenGrid'&&e.colorMode==='image')out.hasPooledImage=true;
-      if(e.type==='image')out.hasImage=true;
+      if(e.type==='image'){out.hasImage=true;for(const key of ['imageWidth','imageHeight'])if(Object.hasOwn(e,key))out[key]=e[key];}
       return out;
     })};
     context.groups=(snapshot.groups||[]).map(g=>({id:g.id,name:g.name,memberIds:clone(g.memberIds||[]),autoStack:!!g.autoStack,stackX:g.stackX,stackY:g.stackY}));
@@ -212,6 +240,9 @@
     ['text','latex'].forEach(k=>fields[k]={type:'string',maxLength:10000});
     ['fromId','toId'].forEach(k=>fields[k]={anyOf:[identifier,{type:'null'}]});
     ['formulaTemplateId','formulaValues'].forEach(k=>fields[k]={type:'null'});
+    fields.assetId={...identifier,description:'本次可信前端参考图片的 assetId；不能使用 URL 或 src'};
+    fields.transparentColor={anyOf:[hex,{type:'null'}],description:'设为六位十六进制颜色将匹配像素变透明；null 关闭透明色'};
+    fields.crop={anyOf:[object({x:{type:'number',minimum:0,maximum:1},y:{type:'number',minimum:0,maximum:1},w:{type:'number',exclusiveMinimum:0,maximum:1},h:{type:'number',exclusiveMinimum:0,maximum:1}}),{type:'null'}],description:'源图归一化裁切坐标；x+w <= 1 且 y+h <= 1；null 恢复完整图片'};
     fields.gradientColors=cornerSchema;
     fields.gradientLayers={type:'array',minItems:1,maxItems:20,items:cornerSchema};
     fields.cellColors={type:'array',minItems:1,maxItems:10000,items:hex};

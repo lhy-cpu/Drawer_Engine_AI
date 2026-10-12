@@ -30,37 +30,42 @@ function element() {
   };
 }
 
-function harness(saved, complete = async () => ({ content: '完成' })) {
+function harness(saved, complete = async () => ({ content: '完成' }), apply = () => ({}), dimensions = [100,100]) {
   const nodes = new Map();
   const get = id => { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); };
   const stored = new Map(saved === undefined ? [] : [[storageKey, JSON.stringify(saved)]]);
-  const timers = [], cleared = [], calls = [];
+  const timers = [], cleared = [], calls = [], intervals = [], clearedIntervals = [], instructions = [], applications = [];
+  let now = 0; const documentListeners = new Map();
   const document = {
     getElementById: get, createElement: tag => tag === 'canvas' ? {
       getContext: () => ({ fillRect() {}, drawImage() {} }), toDataURL: () => 'data:image/jpeg;base64,test',
     } : element(),
-    querySelector: () => element(), querySelectorAll: () => [], addEventListener() {},
+    querySelector: () => element(), querySelectorAll: () => [], addEventListener(type, handler) { documentListeners.set(type, handler); },
   };
   const context = {
-    document, AbortController, DOMException,
+    document, AbortController, DOMException, Date: {now: () => now},
     FileReader: class { readAsDataURL() { this.result = 'data:image/png;base64,test'; this.onload(); } },
-    Image: class { naturalWidth = 100; naturalHeight = 100; set src(value) { this.onload(); } },
+    Image: class { naturalWidth = dimensions[0]; naturalHeight = dimensions[1]; set src(value) { this.onload(); } },
     localStorage: {
       getItem: key => stored.get(key) ?? null,
       setItem: (key, value) => stored.set(key, value), removeItem: key => stored.delete(key),
     },
     setTimeout: (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; },
     clearTimeout: timer => cleared.push(timer),
+    setInterval: (callback, delay) => {const interval={callback,delay};intervals.push(interval);return interval;},
+    clearInterval: interval => clearedIntervals.push(interval),
     window: {
-      FlowSketchEditor: { readonly: false, assertEditable() {}, fingerprint: () => 'same', snapshot: () => ({}), apply: () => ({}), fit() {} },
+      FlowSketchEditor: { readonly: false, assertEditable() {}, fingerprint: () => 'same', snapshot: () => ({}), apply: (...args) => {applications.push(args);return apply(...args);}, fit() {} },
       FlowSketchAIEngine: { describe: snapshot => snapshot },
-      FlowSketchAIPrompts: { tool: () => ({}), instructions: () => 'instructions' },
+      FlowSketchAIPrompts: { tool: () => ({}), instructions: (...args) => {instructions.push(args);return 'instructions';} },
       FlowSketchAIClient: { endpoint() {}, complete: options => { calls.push(options); return complete(options); } },
     },
   };
   vm.runInNewContext(source, context, { filename: 'assets/js/ai.js' });
   return {
-    get, stored, timers, cleared, calls,
+    get, stored, timers, cleared, calls, intervals, clearedIntervals, instructions, applications,
+    tick: seconds => {now=seconds*1000;intervals.forEach(item=>item.callback());},
+    documentEvent: type => documentListeners.get(type)?.(),
     send: (text = '画图') => { get('aiPrompt').value = text; return get('aiForm').emit('submit'); },
     input: value => { get('aiTimeout').value = value; get('aiTimeout').emit('input'); },
     history: value => { get('aiHistory').value = value; get('aiHistory').emit('input'); },
@@ -264,4 +269,126 @@ test('manual stop cancels the configured deadline without a timeout message', as
   assert.match(h.notices(), /已停止生成/);
   assert.doesNotMatch(h.notices(), /请求超过/);
   assert.deepEqual(h.cleared, [h.timers[0]]);
+});
+
+test('300-second deadline is total across tool rounds and elapsed status ticks once per second', async () => {
+  let release;
+  const h = harness({ ...configured, timeoutSeconds: 300, mode: 'tools' }, () => new Promise(resolve => {release=resolve;}));
+  const pending=h.send();
+  assert.equal(h.timers[0].delay,300000);
+  assert.equal(h.intervals[0].delay,1000);
+  h.tick(181);
+  assert.match(h.get('aiStatus').textContent,/已用 181 秒 \/ 上限 300 秒/);
+  release({content:'',tool_calls:[{id:'one',function:{name:'edit_canvas',arguments:'{"operations":[]}'}}]});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.timers.length,1);
+  assert.match(h.get('aiStatus').textContent,/已应用 1 批修改/);
+  release({content:'完成'});
+  await pending;
+  assert.deepEqual(h.clearedIntervals,[h.intervals[0]]);
+});
+
+test('document transition stops generation with a distinct reason and clears both timers', async () => {
+  const h=harness({...configured,timeoutSeconds:300},({signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')))));
+  const pending=h.send();
+  h.documentEvent('flowsketch:document-transition');
+  h.documentEvent('flowsketch:document-change');
+  await pending;
+  assert.match(h.notices(),/已切换文件，停止当前生成/);
+  assert.match(h.get('aiStatus').textContent,/文件切换/);
+  assert.deepEqual(h.clearedIntervals,[h.intervals[0]]);
+});
+
+test('early SSE interruption explains the configured limit without claiming proxy causation', async () => {
+  const h=harness({...configured,timeoutSeconds:300},async()=>{throw Error('API 流意外中断或缺少结束标记，未执行任何操作。');});
+  await h.send();
+  assert.match(h.notices(),/页面总时限为 300 秒/);
+  assert.match(h.notices(),/proxy_read_timeout/);
+  assert.match(h.notices(),/无法确定中断原因/);
+  assert.doesNotMatch(h.notices(),/请求超过/);
+  assert.equal(h.get('aiStatus').textContent,'连接或上游回复中断');
+  assert.deepEqual(h.clearedIntervals,[h.intervals[0]]);
+});
+
+test('failed tool batch never reports the canvas as synchronized or updated', async () => {
+  let count=0;
+  const h=harness({...configured,mode:'tools'},async()=>++count===1?{content:'',tool_calls:[{id:'one',function:{name:'edit_canvas',arguments:'{"operations":[]}'}}]}:{content:'无法应用'},()=>{throw Error('bad operation');});
+  await h.send();
+  assert.match(h.get('aiStatus').textContent,/修改未应用/);
+  assert.doesNotMatch(h.notices(),/已应用/);
+});
+
+function drag(h,type,files=[]) {
+  let prevented=0,stopped=0;
+  const event={preventDefault(){prevented++;},stopPropagation(){stopped++;},dataTransfer:{files}};
+  h.get('aiPanel').emit(type,event);
+  assert.equal(prevented,1);assert.equal(stopped,1);
+  return event;
+}
+
+test('panel consumes disabled and unsupported drops with clear feedback', async () => {
+  const h=harness(configured);
+  for(const type of ['dragenter','dragover','dragleave','drop'])drag(h,type,[{type:'image/png'}]);
+  assert.match(h.notices(),/请先启用/);
+  assert.equal(h.get('aiAttachments').children.length,0);
+  h.get('aiVision').checked=true;h.get('aiVision').emit('input');
+  drag(h,'drop',[{type:'application/pdf',size:1,name:'bad.pdf'}]);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(h.notices(),/只支持 PNG/);
+  assert.equal(h.applications.length,0);
+});
+
+test('nested panel drag highlight clears reliably and image drops become attachments only', async () => {
+  const h=harness({...configured,vision:true});
+  const hint=h.get('aiPanel').children[0];
+  drag(h,'dragenter');drag(h,'dragenter');drag(h,'dragleave');
+  assert.equal(hint.hidden,false);
+  drag(h,'dragleave');assert.equal(hint.hidden,true);
+  drag(h,'dragenter');drag(h,'drop',[{type:'image/png',size:1,name:'reference.png'}]);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(hint.hidden,true);
+  assert.equal(h.get('aiAttachments').children.length,1);
+  assert.equal(h.applications.length,0);
+});
+
+test('busy panel intercepts drag and reports that image attachment must wait', async () => {
+  const h=harness({...configured,vision:true},({signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')))));
+  const pending=h.send();drag(h,'drop',[{type:'image/png',size:1,name:'reference.png'}]);
+  assert.match(h.notices(),/正在生成，请完成或停止/);
+  assert.equal(h.get('aiAttachments').children.length,0);
+  h.get('aiStop').onclick();await pending;
+});
+
+test('reference metadata and safe assets follow included history and editor apply options', async () => {
+  const h=harness({...configured,vision:true},async()=>({content:'```flowsketch\n{"operations":[]}\n```'}));
+  await h.addImage();await h.send('reference');
+  const metadata=h.instructions[0][2];
+  assert.equal(metadata.length,1);
+  assert.match(metadata[0].assetId,/^ref_\d+$/);
+  assert.equal(metadata[0].width,100);assert.equal(metadata[0].height,100);
+  assert.equal(metadata[0].name,'reference.png');
+  assert.equal(Object.hasOwn(metadata[0],'src'),false);
+  assert.match(h.calls[0].messages.at(-1).content[0].text,new RegExp(metadata[0].assetId));
+  assert.equal(h.applications[0][2].assetMap[metadata[0].assetId].src,'data:image/jpeg;base64,test');
+  await h.send('use prior image');
+  assert.equal(h.instructions[1][2][0].assetId,metadata[0].assetId);
+  h.history('1');await h.send('outside window');
+  assert.equal(h.instructions[2][2].length,0);
+  assert.equal(Object.keys(h.applications[2][2].assetMap).length,0);
+  h.history('100');await h.send('restore history');
+  assert.equal(h.instructions[3][2][0].assetId,metadata[0].assetId);
+  h.get('aiClear').onclick();await h.send('cleared');
+  assert.equal(h.instructions[4][2].length,0);
+});
+
+
+test('asset dimensions describe the prepared JPEG and pruned turns release reference access', async () => {
+  const h=harness({...configured,vision:true,historyTurns:1},async()=>({content:'完成'}),()=>({}),[3200,2400]);
+  await h.addImage();await h.send('reference');
+  assert.equal(h.instructions[0][2][0].width,1600);
+  assert.equal(h.instructions[0][2][0].height,1200);
+  for(let n=0;n<100;n++)await h.send(`later ${n}`);
+  h.history('100');await h.send('old reference pruned');
+  assert.equal(h.instructions.at(-1)[2].length,0);
+  assert.equal(h.calls.at(-1).messages.some(message=>Array.isArray(message.content)),false);
 });

@@ -165,3 +165,13 @@ test('render failure restores the original project and selection without committ
   assert.deepEqual(Array.from(context.selection), ['one']);
   assert.deepEqual(calls, ['engine.apply', 'normalize', 'normalizeExtra', 'syncUI', 'render', 'syncUI', 'render']);
 });
+
+test('reference images reach the engine only through the supplied local asset map', () => {
+  const {editor, context} = harness();
+  const assets = {ref_1: {src: 'data:image/png;base64,AAAA', width: 20, height: 10}};
+  context.window.FlowSketchAIEngine.apply = (project, operations, received) => {
+    assert.equal(received, assets);
+    return {...project, name: 'Reference applied'};
+  };
+  assert.equal(editor.apply(edits, editor.fingerprint(), {assetMap: assets}), 'Reference applied');
+});

@@ -110,3 +110,42 @@ test('nested route and color arrays reject accessors before evaluation',()=>{
   assert.throws(()=>apply(fresh(),[add('edge','connector',{routePoints:unsafe})]),/不安全/);
   assert.throws(()=>apply(fresh(),[add('grid','tokenGrid',{cellColors:unsafe})]),/不安全/);
 });
+
+const raster='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a42sAAAAASUVORK5CYII=';
+const referenceAssets=()=>({reference_one:{src:raster,name:'参考图',width:1200,height:600}});
+test('trusted image references clone local source and preserve editable crop/rotation/flip metadata',()=>{
+  const assets=referenceAssets(),source=fresh();
+  const output=apply(source,[add('image','image',{assetId:'reference_one',crop:{x:.1,y:.2,w:.5,h:.6},flipX:true,rotation:-90})],assets);
+  const e=output.elements[0];assert.equal(e.src,raster);assert.equal(e.assetId,undefined);assert.equal(e.imageWidth,1200);assert.equal(e.imageHeight,600);assert.equal(e.w,320);assert.equal(e.h,160);assert.equal(e.flipX,true);assert.equal(e.flipY,false);assert.equal(e.rotation,-90);
+  assets.reference_one.src='changed';e.crop.x=.2;assert.equal(source.elements.length,0);
+  const updated=apply(output,[{op:'update',id:'image',changes:{crop:null,flipY:true,fit:'cover',rotation:360}}]);
+  assert.equal(updated.elements[0].crop,null);assert.equal(updated.elements[0].flipY,true);assert.equal(updated.elements[0].src,raster);assert.equal(output.elements[0].flipY,false);
+  const context=describe(updated);assert.equal(context.elements[0].imageWidth,1200);assert.equal(context.elements[0].crop,null);assert.equal(context.elements[0].flipY,true);assert.ok(!JSON.stringify(context).includes('base64'));
+});
+test('image reference rejects model URLs, unsafe asset data and source changes atomically',()=>{
+  const source=fresh(),before=JSON.stringify(source);
+  for(const element of [{assetId:'missing'},{src:raster,assetId:'reference_one'},{assetId:'https://host/image'},{assetId:'reference_one',crop:{x:.8,y:0,w:.3,h:1}},{assetId:'reference_one',flipX:'true'}]) {
+    assert.throws(()=>apply(source,[add('first'),add('image','image',element)],referenceAssets()));assert.equal(JSON.stringify(source),before);
+  }
+  for(const src of ['https://host/image','data:image/svg+xml;base64,PHN2Zy8+','data:image/png;base64,abc','data:image/png;base64,AAAA\n','data:image/png;base64,','data:image/png;base64,AAAA'+ '='.repeat(3)])assert.throws(()=>apply(source,[add('i','image',{assetId:'reference_one'})],{reference_one:{src,width:1,height:1}}));
+  const assets=referenceAssets();Object.defineProperty(assets.reference_one,'src',{get(){throw Error('getter executed');},enumerable:true});assert.throws(()=>apply(source,[add('i','image',{assetId:'reference_one'})],assets),/不安全/);
+  const output=apply(source,[add('i','image',{assetId:'reference_one'})],referenceAssets());
+  for(const changes of [{assetId:'reference_one'},{src:raster},{imageWidth:200},{crop:{x:0,y:0,w:0,h:1}},{crop:{x:'0',y:0,w:1,h:1}},{crop:{x:0,y:0,w:Infinity,h:1}},{crop:{x:0,y:0,w:1,h:1,extra:0}},{crop:{x:0,y:0,w:1}}])assert.throws(()=>apply(output,[{op:'update',id:'i',changes}]));
+  assert.throws(()=>apply(source,[add('a','basicShape',{crop:null})]),/未知字段/);
+  assert.doesNotThrow(()=>apply(output,[{op:'update',id:'i',changes:{crop:{x:.1,y:0,w:.9000000001,h:1}}}]));
+});
+
+test('image transparent color adds and updates without replacing source, and invalid edits remain atomic',()=>{
+  const project=apply(fresh(),[add('image','image',{assetId:'reference_one'})],referenceAssets());
+  assert.equal(project.elements[0].transparentColor,null);assert.equal(project.elements[0].colorTolerance,24);
+  const added=apply(fresh(),[add('image','image',{assetId:'reference_one',transparentColor:'#FFFFFF',colorTolerance:0})],referenceAssets());
+  assert.equal(added.elements[0].transparentColor,'#FFFFFF');assert.equal(added.elements[0].colorTolerance,0);
+  const edited=apply(project,[{op:'update',id:'image',changes:{transparentColor:'#aBcDEF',colorTolerance:255}}]);
+  assert.equal(edited.elements[0].src,raster);assert.equal(project.elements[0].transparentColor,null);
+  const context=describe(edited);assert.equal(context.elements[0].transparentColor,'#aBcDEF');assert.equal(context.elements[0].colorTolerance,255);assert.ok(!JSON.stringify(context).includes('base64'));
+  assert.equal(apply(edited,[{op:'update',id:'image',changes:{transparentColor:null}}]).elements[0].transparentColor,null);
+  for(const changes of [{transparentColor:'#fff'},{transparentColor:'white'},{transparentColor:'#ffffffff'},{transparentColor:'transparent'},{transparentColor:24},{colorTolerance:-1},{colorTolerance:256},{colorTolerance:1.5},{colorTolerance:'24'},{colorTolerance:NaN}]) {
+    const before=JSON.stringify(project);assert.throws(()=>apply(project,[{op:'rename',name:'should not persist'},{op:'update',id:'image',changes}]));assert.equal(JSON.stringify(project),before);
+  }
+  for(const type of ['basicShape','text','note','token','tokenGrid','formula','connector'])for(const field of ['transparentColor','colorTolerance'])assert.throws(()=>apply(fresh(),[add('other',type,{[field]:field==='transparentColor'?null:24})]),/未知字段/);
+});
