@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
+const arrowHelpers=html.slice(html.indexOf('  function connectorArrowDimensions('),html.indexOf('  function arrowMarkerSpec('));
 function dropHarness(){
   const listeners=[],imported=[];let overlay=false;
   const context={previewMode:false,dragDepth:0,hasDraggedFiles:e=>e.dataTransfer.types.includes('Files'),
@@ -37,4 +38,219 @@ for(const change of ['undo','color'])test(`image export discards an async result
   if(change==='undo')current={...image};else image.transparentColor='#000000';
   resolve('processed-old-color');await assert.rejects(operation,/已变化/);
   assert.equal(cache.has(image),false);assert.deepEqual(writes,[]);
+});
+test('svgConnector exports decoupled userSpaceOnUse markers allowing thick lines with small arrows',()=>{
+  const context={
+    clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),
+    points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),
+    pathData:(e,a,b)=>`M${a.x},${a.y} L${b.x},${b.y}`,
+  };
+  const markerSnippet=html.slice(html.indexOf('  function arrowMarkerSpec('),html.indexOf('  function renderConnector('));
+  const svgConnSnippet=html.slice(html.indexOf('  function svgConnector('),html.indexOf('  function svgText('));
+  vm.runInNewContext(arrowHelpers+'\n'+markerSnippet+'\n'+svgConnSnippet,context);
+
+  const thickSmall={
+    id:'conn1',
+    fromX:10,fromY:20,toX:100,toY:20,
+    stroke:'#1d4ed8',
+    strokeWidth:12,
+    arrowStartStyle:'none',
+    arrowEndStyle:'triangle',
+    arrowWidth:6,
+    arrowLength:8,
+  };
+  const svg=context.svgConnector(thickSmall);
+  assert.match(svg,/stroke-width="12"/);
+  assert.match(svg,/markerUnits="userSpaceOnUse"/);
+  assert.match(svg,/markerWidth="8"/);
+  assert.match(svg,/markerHeight="6"/);
+  assert.match(svg,/preserveAspectRatio="none"/);
+
+  const clampedBoth={
+    id:'conn2',
+    fromX:0,fromY:0,toX:50,toY:50,
+    stroke:'#000000',
+    strokeWidth:2,
+    arrowStartStyle:'circle',
+    arrowEndStyle:'stealth',
+    arrowWidth:2,
+    arrowLength:150,
+  };
+  const clampedSvg=context.svgConnector(clampedBoth);
+  assert.match(clampedSvg,/id="export-start-conn2"[^>]*markerWidth="100"[^>]*markerHeight="4"/);
+  assert.match(clampedSvg,/id="export-end-conn2"[^>]*markerWidth="100"[^>]*markerHeight="4"/);
+});
+test('connector properties panel exposes arrowWidth/arrowLength inputs and clamped bindings',()=>{
+  const rPropsStart=html.indexOf('  function renderProps(){');
+  const rPropsEnd=html.indexOf("\n    if(e.type==='formula'){props.innerHTML",rPropsStart);
+  const helpersStart=html.indexOf('  function rowText(');
+  const helpersEnd=html.indexOf('  function alignSelection(',helpersStart);
+  const bindPropsStart=html.indexOf('  function bindProps(){');
+  const bindPropsEnd=html.indexOf('  function layerAction(',bindPropsStart);
+
+  const connector={
+    id:'conn1',
+    type:'connector',
+    route:'orthogonal',
+    arrowStartStyle:'none',
+    arrowEndStyle:'triangle',
+    arrowWidth:14,
+    arrowLength:18,
+    stroke:'#1d4ed8',
+    strokeWidth:4,
+    dash:false,
+  };
+  const propsBox={innerHTML:'',querySelectorAll:()=>[],querySelector:()=>null};
+  const ctx={
+    selected:()=>connector,
+    selection:['conn1'],
+    props:propsBox,
+    esc:s=>s,
+    clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),
+    layerControls:()=>'',
+    themeControls:()=>'',
+    bindThemeControls:()=>{},
+    bindProps:()=>{},
+    $:()=>({onclick:null}),
+    commit:()=>{},
+    render:()=>{},
+  };
+
+  vm.runInNewContext(arrowHelpers+'\n'+html.slice(helpersStart,helpersEnd)+'\n'+html.slice(rPropsStart,rPropsEnd)+'}\nrenderProps();',ctx);
+  assert.match(propsBox.innerHTML,/data-prop="arrowWidth"/);
+  assert.match(propsBox.innerHTML,/data-prop="arrowLength"/);
+  assert.match(propsBox.innerHTML,/支持粗线配小箭头/);
+
+  let committed=0,rendered=0;
+  const inputWidth={dataset:{prop:'arrowWidth'},type:'number',value:'2',onchange:null};
+  const inputLength={dataset:{prop:'arrowLength'},type:'number',value:'160',onchange:null};
+  const bindCtx={
+    selected:()=>connector,
+    props:{querySelectorAll:sel=>sel==='[data-prop]'?[inputWidth,inputLength]:[]},
+    clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),
+    commit:()=>{committed++;},
+    render:()=>{rendered++;},
+  };
+  vm.runInNewContext(html.slice(bindPropsStart,bindPropsEnd)+'\nbindProps();',bindCtx);
+  inputWidth.onchange();
+  assert.equal(connector.arrowWidth,4);
+  assert.equal(committed,1);
+  assert.equal(rendered,1);
+
+  inputLength.onchange();
+  assert.equal(connector.arrowLength,100);
+  assert.equal(committed,2);
+  assert.equal(rendered,2);
+});
+test('connector selection renders independent length/width handles and guide lines',()=>{
+  const rSelStart=html.indexOf('  function renderSelection(){');
+  const rSelEnd=html.indexOf('  function renderAnchorPorts(',rSelStart);
+  const connector={
+    id:'conn1',
+    type:'connector',
+    fromX:10,fromY:20,
+    toX:100,toY:20,
+    route:'straight',
+    arrowStartStyle:'open',
+    arrowEndStyle:'triangle',
+    arrowWidth:14,
+    arrowLength:18,
+  };
+  const appended=[];
+  const ctx={
+    selection:['conn1'],
+    el:id=>id==='conn1'?connector:null,
+    project:{canvas:{snap:true}},
+    interaction:null,
+    canvas:{append:node=>appended.push(node)},
+    clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),
+    points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),
+    connectorGeometry:(e,a,b)=>({vertices:[a,b]}),
+    connectorGuide:(a,b,cls)=>appended.push({type:'guide',a,b,cls}),
+    connectorControl:(e,q,kind,data,title)=>appended.push({type:'control',e,q,kind,data,title}),
+    document:{createElement:tag=>({tagName:tag,classList:{add:()=>{}},style:{},dataset:{},addEventListener:()=>{}})},
+    endpointDown:()=>{},
+  };
+
+  vm.runInNewContext(
+    arrowHelpers+'\n'+
+    html.slice(rSelStart,rSelEnd)+'\nrenderSelection();',
+    ctx
+  );
+
+  const lenControls=appended.filter(n=>n.type==='control'&&n.kind==='arrow-len');
+  const widControls=appended.filter(n=>n.type==='control'&&n.kind==='arrow-wid');
+  const guides=appended.filter(n=>n.type==='guide'&&n.cls==='arrow-guide');
+
+  assert.equal(lenControls.length,2);
+  assert.equal(widControls.length,2);
+  assert.equal(guides.length,2);
+
+  const toLen=lenControls.find(c=>c.data.arrowEnd==='to');
+  const toWid=widControls.find(c=>c.data.arrowEnd==='to');
+  assert.equal(toLen.q.x,100-24);
+  assert.equal(toLen.q.y,20);
+  assert.match(toLen.title,/18px/);
+  assert.equal(toWid.q.x,100-24);
+  assert.equal(toWid.q.y,20+24);
+  assert.match(toWid.title,/14px/);
+});
+
+test('old connector sizes survive normalization, saving and SVG export without truncation',()=>{
+  const elements=[0,1,2,12,30].map(strokeWidth=>({id:'old'+strokeWidth,type:'connector',strokeWidth,arrowEnd:true,fromX:20,fromY:20,toX:180,toY:20}));
+  elements.push({id:'custom',type:'connector',strokeWidth:12,arrowWidth:6,arrowLength:8,arrowEnd:true});
+  const context={project:{version:12,elements,groups:[]},uid:()=> 'unused',clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),connectorArrowStyles:['none','triangle','stealth','open','diamond','circle'],points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),pathData:()=> 'M20,20 L180,20'};
+  vm.createContext(context);
+  const normalize=html.slice(html.indexOf('  function normalizeExtra(){'),html.indexOf('  function defaultGradientLayer('));
+  vm.runInContext(arrowHelpers+'\n'+normalize+'\nnormalizeExtra();',context);
+  const original=JSON.stringify(context.project);
+  context.project=JSON.parse(original);vm.runInContext('normalizeExtra();',context);
+  assert.equal(JSON.stringify(context.project),original);
+  for(const e of context.project.elements.slice(0,-1)){
+    assert.equal(Object.hasOwn(e,'arrowWidth'),false);assert.equal(Object.hasOwn(e,'arrowLength'),false);
+    const size=context.connectorArrowDimensions(e);assert.equal(size.width,8*e.strokeWidth);assert.equal(size.length,10*e.strokeWidth);
+  }
+  vm.runInContext(html.slice(html.indexOf('  function arrowMarkerSpec('),html.indexOf('  function renderConnector('))+'\n'+html.slice(html.indexOf('  function svgConnector('),html.indexOf('  function svgText(')),context);
+  const legacySvg=context.svgConnector(context.project.elements.find(e=>e.strokeWidth===12&&!e.arrowWidth));
+  assert.match(legacySvg,/markerWidth="120" markerHeight="96"/);
+  const custom=context.project.elements.at(-1);custom.strokeWidth=30;
+  assert.equal(context.connectorArrowDimensions(custom).width,6);assert.equal(context.connectorArrowDimensions(custom).length,8);
+  assert.match(context.svgConnector(custom),/markerWidth="8" markerHeight="6"/);
+});
+
+test('arrow controls keep clear hit targets at small sizes, both ends and diagonal directions',()=>{
+  const context={clamp:(v,a,b)=>Math.max(a,Math.min(b,v))};vm.runInNewContext(arrowHelpers,context);
+  for(const [width,length] of [[4,18],[14,4],[4,4],[100,100]])for(const angle of [0,Math.PI/4,Math.PI/2])for(const distance of [0,10,36,200]){
+    const u={x:Math.cos(angle),y:Math.sin(angle)},a={x:200,y:200},b={x:200+u.x*distance,y:200+u.y*distance};
+    const occupied=[a,b],controls=[];
+    for(const [tip,direction] of [[b,u],[a,{x:-u.x,y:-u.y}]]){
+      const q=context.connectorArrowControlPositions(tip,direction,width,length,occupied);controls.push(q.lengthPoint,q.widthPoint);
+    }
+    for(let i=0;i<controls.length;i++)for(const q of [a,b,...controls.slice(0,i)])assert.ok(Math.hypot(controls[i].x-q.x,controls[i].y-q.y)>=24-1e-8);
+  }
+});
+
+test('displaced arrow handles use pointer deltas without a jump and commit one undo step',()=>{
+  for(const dim of ['length','width']){
+    const connector={id:'one',type:'connector',arrowWidth:4,arrowLength:4,fromX:10,fromY:20,toX:100,toY:20,route:'straight'};
+    const handlers={},calls=[];
+    const context={el:()=>connector,interaction:null,clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),connectorGeometry:(e,a,b)=>({vertices:[a,b]}),pt:e=>e.point,window:{addEventListener:(name,fn)=>handlers[name]=fn},renderFast:()=>calls.push('render'),render:()=>calls.push('render'),commit:()=>calls.push('commit'),canvas:{querySelectorAll:()=>[]}};
+    vm.createContext(context);
+    vm.runInContext(arrowHelpers+'\n'+html.slice(html.indexOf('  function connectorControlDown('),html.indexOf('  function boundsOf(')),context);
+    vm.runInContext(html.slice(html.indexOf("  window.addEventListener('pointerup',ev=>"),html.indexOf('  function renderFast(){')),context);
+    const start={x:76,y:dim==='length'?20:44};
+    context.connectorControlDown({point:start,currentTarget:{dataset:{id:'one',arrowEnd:'to',arrowDim:dim},setPointerCapture(){}},stopPropagation(){},preventDefault(){}});
+    handlers.pointermove({point:start});assert.equal(connector.arrowLength,4);assert.equal(connector.arrowWidth,4);
+    handlers.pointermove({point:{x:start.x+(dim==='length'?-6:0),y:start.y+(dim==='width'?3:0)}});
+    assert.equal(connector[dim==='length'?'arrowLength':'arrowWidth'],10);
+    assert.equal(connector.toX,100);assert.equal(connector.toY,20);
+    handlers.pointerup({});assert.equal(context.interaction,null);assert.equal(calls.filter(c=>c==='commit').length,1);
+  }
+});
+
+test('zero-length curve lead-ins use the next nonzero tangent for arrow controls',()=>{
+  const context={points:()=>({a:{x:0,y:0},b:{x:100,y:100}}),connectorGeometry:()=>({vertices:[{x:0,y:0},{x:0,y:0},{x:0,y:0},{x:40,y:100},{x:80,y:100},{x:100,y:100}]})};
+  vm.runInNewContext(arrowHelpers,context);
+  const from=context.connectorArrowTangent({},'from');assert.ok(Math.abs(from.x+40/Math.hypot(40,100))<1e-10);assert.ok(Math.abs(from.y+100/Math.hypot(40,100))<1e-10);
+  const to=context.connectorArrowTangent({},'to');assert.equal(to.x,1);assert.equal(to.y,0);
 });

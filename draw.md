@@ -390,6 +390,8 @@ AI 无法取得真实图片数据时，不要捏造 Base64。可使用用户提�
   "dash": false,
   "arrowStartStyle": "none",
   "arrowEndStyle": "triangle",
+  "arrowWidth": 14,
+  "arrowLength": 18,
   "visible": true,
   "locked": false
 }
@@ -402,6 +404,7 @@ AI 无法取得真实图片数据时，不要捏造 Base64。可使用用户提�
 - `routePoints`: 手动折线路由点数组，格式为 `[{"x": 420, "y": 300}]`。空数组表示自动选择最简折数；编辑器中的“增加绕行段”和绿色段手柄会写入这些点。
 - `curveControls`: 曲线控制杆相对首尾端点的向量，格式为 `{"from":{"x":80,"y":-40},"to":{"x":-80,"y":40}}`。控制向量同时决定端点引出直线方向和曲线切线；`null` 表示自动曲率。
 - `arrowStartStyle` / `arrowEndStyle`: 首尾箭头样式，允许 `none`、`triangle`、`stealth`、`open`、`diamond`、`circle`。`none` 表示无箭头。
+- `arrowWidth` / `arrowLength`: 箭头宽度与长度（4..100，默认 14 与 18）。支持粗线配小箭头，画布上有独立控制点和属性输入框进行自定义。 新建连接线默认 14 与 18；旧项目缺少尺寸字段时保留原来的随线宽缩放效果，设置对应尺寸后改为独立控制。SVG、PNG 和 PPTX 导出保留实际尺寸。
 - `fromId` / `toId`: 绑定元素 ID。未绑定时可省略或设为 `null`。
 - `fromSide` / `toSide`: `left`、`right`、`top`、`bottom`。
 - `fromX/Y`、`toX/Y`: 未绑定时是实际端点；绑定时作为回退坐标，仍应填写合理值。

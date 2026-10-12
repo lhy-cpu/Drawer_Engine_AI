@@ -85,8 +85,8 @@ test('connector manual routes, relative curve controls and six arrow styles rema
   const curve={from:{x:80,y:-40},to:{x:-80,y:40}};
   const p=apply(fresh(),[add('line','connector',{route:'curve',curveControls:curve,arrowStartStyle:'circle',arrowEndStyle:'stealth',routeBias:'vertical',routePoints:[{x:100,y:200}]})]);
   assert.equal(p.elements[0].curveControlVersion,2);assert.equal(p.elements[0].arrowStart,true);assert.deepEqual(p.elements[0].curveControls,curve);
-  const updated=apply(p,[{op:'update',id:'line',changes:{arrowEnd:false,arrowStartStyle:'open',curveControls:null,routePoints:[]}}]);assert.equal(updated.elements[0].arrowEndStyle,'none');assert.equal(updated.elements[0].arrowStartStyle,'open');assert.equal(updated.elements[0].curveControls,null);
-  for(const fields of [{routePoints:[{x:Infinity,y:0}]},{routePoints:[{x:1,y:2,html:'bad'}]},{curveControls:{from:{x:1,y:2}}},{arrowEndStyle:'javascript'},{controlPoints:[]}])assert.throws(()=>apply(p,[{op:'update',id:'line',changes:fields}]));
+  const updated=apply(p,[{op:'update',id:'line',changes:{arrowEnd:false,arrowStartStyle:'open',curveControls:null,routePoints:[],arrowWidth:8,arrowLength:10}}]);assert.equal(updated.elements[0].arrowEndStyle,'none');assert.equal(updated.elements[0].arrowStartStyle,'open');assert.equal(updated.elements[0].curveControls,null);assert.equal(updated.elements[0].arrowWidth,8);assert.equal(updated.elements[0].arrowLength,10);
+  for(const fields of [{routePoints:[{x:Infinity,y:0}]},{routePoints:[{x:1,y:2,html:'bad'}]},{curveControls:{from:{x:1,y:2}}},{arrowEndStyle:'javascript'},{controlPoints:[]},{arrowWidth:2},{arrowWidth:101},{arrowLength:'big'}])assert.throws(()=>apply(p,[{op:'update',id:'line',changes:fields}]));
   const rotated=apply(fresh(),[add('node','basicShape',{x:100,y:100,w:100,h:100,rotation:90}),add('line','connector',{fromId:'node',fromSide:'right'}),{op:'delete',id:'node'}]);assert.ok(Math.abs(rotated.elements[0].fromX-150)<1e-9);assert.ok(Math.abs(rotated.elements[0].fromY-200)<1e-9);
 });
 test('real groups transfer ownership, stack in layer order, delete and clear consistently',()=>{

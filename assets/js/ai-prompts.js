@@ -20,7 +20,7 @@
 
 复杂数据和绘制预算：
 10. 普通图形 colorMode 仅 solid/gradient；gradient 时必须有完整 gradientColors:{tl,tr,bl,br}，不得使用 stops/angle/数组。tokenGrid 的 colorMode 仅 solid/cells/gradient（单个 type:"token" 仅 solid/gradient）；cells 时 cellColors.length 必须等于 rows*cols，按行排列；gradient 时 gradientLayers.length 必须等于 depthCount，每层包含完整四角颜色。更改行列或层数时同步保证数组长度。cellColorIndex < rows*cols，gradientEditLayer < depthCount。已有图片池化的 colorMode:"image" 仅用于识别，不能创建或改变它的 rows/cols/colorMode/colorChannels。
-11. routePoints 是最多100个 {x,y} 的数组；curveControls 为 null 或完整 {from:{x,y},to:{x,y}}，控制点是相对端点的向量，不是绝对坐标。箭头优先设置 arrowStartStyle/arrowEndStyle，none 表示无箭头；不要再写矛盾的 arrowStart/arrowEnd。普通图形/Token 默认省略 w/h 等可自动生成的可选字段，公式应按内容长度设置 w/h，字号建议12..96。
+11. routePoints 是最多100个 {x,y} 的数组；curveControls 为 null 或完整 {from:{x,y},to:{x,y}}，控制点是相对端点的向量，不是绝对坐标。箭头优先设置 arrowStartStyle/arrowEndStyle，none 表示无箭头；不要再写矛盾的 arrowStart/arrowEnd。箭头大小可指定 arrowWidth（4..100，默认14）与 arrowLength（4..100，默认18）实现粗线配小箭头。普通图形/Token 默认省略 w/h 等可自动生成的可选字段，公式应按内容长度设置 w/h，字号建议12..96。
 12. LaTeX 必须可由 KaTeX 解析；禁止 HTML、链接、外部图片、宏定义。无需写 formulaTemplateId/formulaValues；修改公式通常只写 latex/displayMode/几何/字号/文字颜色。
 13. 图片 crop 为 null 或完整 {x,y,w,h}，是源图 0..1 归一化坐标；x/y >= 0、w/h > 0、x+w <= 1、y+h <= 1。crop:null 恢复原图；flipX/flipY 是布尔值；rotation 为 -360..360 度。仅 image 支持 transparentColor:null 或严格 #RRGGBB：将该颜色附近的像素变透明；null 关闭透明色并恢复原图颜色。colorTolerance 是 0..255 整数，默认24；例如去白底使用 transparentColor:"#FFFFFF",colorTolerance:24。新增图片必须引用本次参考图 assetId，可从参考图裁出素材放进画布；禁止生成 src、URL 或远程图片资源；禁止 update 修改 assetId/src。没有本次参考图时不能新增陌生图片，但可以裁切旋转镜像画布已有图片。
 14. 编辑后的总元素数和组合数各不超过500，总 Token 绘制单元不超过10000：普通 tokenGrid 按 rows*cols*depthCount 计算，已有图片池化按 rows*cols*colorChannels.length 计算并计入总量。既有超额项目只可保持或减少原有超额规模，不得增加。不要以批次拆分绕过预算。文本/LaTeX 最多10000字符，项目/组合名称最多200字符。

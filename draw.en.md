@@ -390,6 +390,8 @@ The renderer retains compatibility with `token`, which uses the normal common fi
   "dash": false,
   "arrowStartStyle": "none",
   "arrowEndStyle": "triangle",
+  "arrowWidth": 14,
+  "arrowLength": 18,
   "visible": true,
   "locked": false
 }
@@ -402,6 +404,7 @@ The renderer retains compatibility with `token`, which uses the normal common fi
 - `routePoints`: Manual orthogonal routing points such as `[{"x": 420, "y": 300}]`. An empty array uses the minimum automatic bend count; **Add detour** and the green segment handles write these points.
 - `curveControls`: Curve-handle vectors relative to the start and end endpoints, such as `{"from":{"x":80,"y":-40},"to":{"x":-80,"y":40}}`. Each vector controls both the endpoint lead-in direction and the curve tangent; use `null` for automatic curvature.
 - `arrowStartStyle` / `arrowEndStyle`: Start and end marker styles. Allowed values are `none`, `triangle`, `stealth`, `open`, `diamond`, and `circle`; `none` disables that marker.
+- `arrowWidth` / `arrowLength`: Arrow width and length (4..100, default 14 and 18). Enables thick lines with small arrows, with independent canvas control handles and property inputs. New connectors default to 14 and 18. Old projects without size fields retain their stroke-scaled markers; setting a dimension makes it independent. SVG, PNG and PPTX exports preserve actual dimensions.
 - `fromId` / `toId`: IDs of bound elements. Omit them or set them to `null` for unbound endpoints.
 - `fromSide` / `toSide`: `left`, `right`, `top`, or `bottom`.
 - `fromX/Y`, `toX/Y`: Actual coordinates for unbound endpoints and fallback coordinates for bound endpoints. Always provide sensible values.
