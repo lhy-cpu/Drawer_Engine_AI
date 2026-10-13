@@ -31,6 +31,16 @@ PPTX export preserves the custom canvas size and layer order. Basic shapes, text
 
 Projects are automatically saved to IndexedDB in the current browser profile. Clearing browser site data removes these local files, so export backups of important work regularly.
 
+## Browser AI Assistant
+
+Use the top-right **AI** panel to configure an OpenAI-compatible Chat Completions endpoint, key, and model. Settings stay in the current browser; messages and canvas data go directly to the configured API, without passing through the webpage server.
+
+Enable **Model supports image input** to send a current canvas screenshot at the start of each request (blank canvases use a text description instead) and after each successful edit. The model can inspect alignment, overlaps, text, and connectors, then make further corrections. Both JSON and tools modes support this feedback loop; tools mode also exposes a read-only `view_canvas` tool. Screenshots contain only the canvas, with grids and editing handles hidden, and exclude chat, settings, and keys. They are observations, not image assets added to the drawing.
+
+Each user message allows up to four screenshot attempts and eight model calls, sharing the configured total timeout and Stop control. Failed captures and limits are reported without discarding applied edits, which remain undoable. Only the latest canvas screenshot remains in model context; uploaded reference images follow the history window. Screenshots live in page memory and are not separately persisted in browser storage.
+
+Click reference images, canvas screenshots, or pending attachments to preview them at fit, original size, or 200%. Use **Select region** to drag a rectangle or enter pixel coordinates, then queue the crop; cropping a pending attachment replaces its original. Select canvas elements and click **Send elements to chat** above the composer, then describe the adjustment. Removable target tags send the actual element IDs and survive canvas deselection. Automatic screenshots use current target bounds with surrounding padding; previous whole-canvas and historical reference pixels are omitted, while structure and trusted asset IDs remain available. Tools can inspect canvas pixels via `view_canvas({region:{x,y,w,h}})` or source-reference pixels via `view_reference({assetId,region})`; omit region for a full image. Region offsets and dimensions accompany every crop. Visual verification applies only to the actual region shown. A persistent animated status shows thinking, drawing, and refinement until the request ends.
+
 ## Formula Editing
 
 Choose **Formula** in the left sidebar to insert a LaTeX formula. The editor provides two workflows:

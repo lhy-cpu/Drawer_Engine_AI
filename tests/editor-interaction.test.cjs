@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
+const connectorPaint=require('../assets/js/connector-paint.js');
 const arrowHelpers=html.slice(html.indexOf('  function connectorArrowDimensions('),html.indexOf('  function arrowMarkerSpec('));
 function dropHarness(){
   const listeners=[],imported=[];let overlay=false;
@@ -41,6 +42,8 @@ for(const change of ['undo','color'])test(`image export discards an async result
 });
 test('svgConnector exports decoupled userSpaceOnUse markers allowing thick lines with small arrows',()=>{
   const context={
+    project:{canvas:{width:600,height:400}},window:{FlowSketchConnectorPaint:connectorPaint},
+    connectorGeometry:(e,a,b)=>({vertices:[a,b],d:`M${a.x},${a.y} L${b.x},${b.y}`}),
     clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),
     points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),
     pathData:(e,a,b)=>`M${a.x},${a.y} L${b.x},${b.y}`,
@@ -120,6 +123,9 @@ test('connector properties panel exposes arrowWidth/arrowLength inputs and clamp
   assert.match(propsBox.innerHTML,/data-prop="arrowWidth"/);
   assert.match(propsBox.innerHTML,/data-prop="arrowLength"/);
   assert.match(propsBox.innerHTML,/支持粗线配小箭头/);
+  const lineInput=propsBox.innerHTML.match(/<input[^>]*data-prop="strokeWidth"[^>]*>/)[0];
+  assert.match(lineInput,/min="0"/);
+  assert.doesNotMatch(lineInput,/\bmax=/);
 
   let committed=0,rendered=0;
   const inputWidth={dataset:{prop:'arrowWidth'},type:'number',value:'2',onchange:null};
@@ -141,6 +147,34 @@ test('connector properties panel exposes arrowWidth/arrowLength inputs and clamp
   assert.equal(connector.arrowLength,100);
   assert.equal(committed,2);
   assert.equal(rendered,2);
+});
+test('connector line width accepts large values and rejects invalid values without committing',()=>{
+  const connector={type:'connector',strokeWidth:30},input={dataset:{prop:'strokeWidth'},type:'number',value:'120'},calls=[];
+  const context={selected:()=>connector,props:{querySelectorAll:s=>s==='[data-prop]'?[input]:[]},commit:()=>calls.push('commit'),render:()=>calls.push('render'),renderProps:()=>calls.push('props'),toast:()=>calls.push('toast')};
+  vm.runInNewContext(html.slice(html.indexOf('  function bindProps(){'),html.indexOf('  function layerAction('))+'\nbindProps();',context);
+  input.onchange();assert.equal(connector.strokeWidth,120);assert.deepEqual(calls,['commit','render']);
+  for(const value of ['-1','Infinity','NaN']){calls.length=0;input.value=value;input.onchange();assert.equal(connector.strokeWidth,120);assert.deepEqual(calls,['toast','props'])}
+});
+test('SVG clips the painted shaft while its arrow carrier keeps the logical endpoint',()=>{
+  const geometry={vertices:[{x:80,y:100},{x:450,y:100}],d:'M80,100 L450,100'};
+  const context={project:{canvas:{width:600,height:400}},window:{FlowSketchConnectorPaint:connectorPaint},connectorGeometry:()=>geometry,points:()=>({a:geometry.vertices[0],b:geometry.vertices[1]}),clamp:(v,a,b)=>Math.max(a,Math.min(b,v))};
+  vm.runInNewContext(arrowHelpers+'\n'+html.slice(html.indexOf('  function arrowMarkerSpec('),html.indexOf('  function renderConnector('))+'\n'+html.slice(html.indexOf('  function svgConnector('),html.indexOf('  function svgText(')),context);
+  const svg=context.svgConnector({id:'join',stroke:'#0b315f',strokeWidth:30,arrowWidth:60,arrowLength:69,arrowStartStyle:'none',arrowEndStyle:'triangle'});
+  assert.match(svg,/<clipPath[^>]*clipPathUnits="userSpaceOnUse"/);
+  assert.match(svg,/<path d="M80,100 L450,100"[^>]*stroke-width="30"[^>]*clip-path="url\(#export-clip-join\)"/);
+  assert.match(svg,/<path d="M80,100 L450,100" fill="none" stroke="none"[^>]*marker-end="url\(#export-end-join\)"/);
+  const polygon=svg.match(/<clipPath[^>]*><polygon points="([^"]*)"/)[1].split(' ').map(pair=>Number(pair.split(',')[0]));
+  assert.ok(Math.abs(Math.max(...polygon)-391.35)<1e-8);
+});
+test('PPTX scene preserves curved logical geometry and shares SVG clipping dimensions',async()=>{
+  const e={type:'connector',stroke:'#123456',strokeWidth:120,arrowWidth:60,arrowLength:69,arrowStartStyle:'none',arrowEndStyle:'triangle',dash:true};
+  const geometry={vertices:[{x:50,y:100},{x:70,y:100},{x:180,y:30},{x:350,y:180},{x:420,y:100},{x:450,y:100}],curve:{sa:{x:70,y:100},c1:{x:180,y:30},c2:{x:350,y:180},eb:{x:420,y:100}}};
+  const context={project:{name:'test',canvas:{width:600,height:400,bg:'#ffffff'},elements:[e]},window:{FlowSketchConnectorPaint:connectorPaint},clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),points:()=>({a:geometry.vertices[0],b:geometry.vertices.at(-1)}),connectorGeometry:()=>geometry};
+  vm.runInNewContext(arrowHelpers+'\n'+html.slice(html.indexOf('  async function pptxScene(){'),html.indexOf('  function svgConnector(')),context);
+  const scene=await context.pptxScene(),item=scene.items[0];
+  assert.equal(item.type,'path');assert.equal(item.points,geometry.vertices);assert.equal(item.curve,geometry.curve);
+  assert.equal(item.width,120);assert.equal(item.arrowLength,69);assert.equal(item.dash,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(item.clipPolygon)),connectorPaint.clipRegion(geometry,{startStyle:'none',endStyle:'triangle',arrowWidth:60,arrowLength:69,strokeWidth:120,width:600,height:400}));
 });
 test('connector selection renders independent length/width handles and guide lines',()=>{
   const rSelStart=html.indexOf('  function renderSelection(){');
@@ -199,7 +233,7 @@ test('connector selection renders independent length/width handles and guide lin
 test('old connector sizes survive normalization, saving and SVG export without truncation',()=>{
   const elements=[0,1,2,12,30].map(strokeWidth=>({id:'old'+strokeWidth,type:'connector',strokeWidth,arrowEnd:true,fromX:20,fromY:20,toX:180,toY:20}));
   elements.push({id:'custom',type:'connector',strokeWidth:12,arrowWidth:6,arrowLength:8,arrowEnd:true});
-  const context={project:{version:12,elements,groups:[]},uid:()=> 'unused',clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),connectorArrowStyles:['none','triangle','stealth','open','diamond','circle'],points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),pathData:()=> 'M20,20 L180,20'};
+  const context={project:{version:12,elements,groups:[],canvas:{width:600,height:400}},window:{FlowSketchConnectorPaint:connectorPaint},connectorGeometry:(e,a,b)=>({vertices:[a,b],d:'M20,20 L180,20'}),uid:()=> 'unused',clamp:(v,a,b)=>Math.max(a,Math.min(b,v)),connectorArrowStyles:['none','triangle','stealth','open','diamond','circle'],points:e=>({a:{x:e.fromX,y:e.fromY},b:{x:e.toX,y:e.toY}}),pathData:()=> 'M20,20 L180,20'};
   vm.createContext(context);
   const normalize=html.slice(html.indexOf('  function normalizeExtra(){'),html.indexOf('  function defaultGradientLayer('));
   vm.runInContext(arrowHelpers+'\n'+normalize+'\nnormalizeExtra();',context);

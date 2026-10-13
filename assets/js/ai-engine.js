@@ -7,7 +7,7 @@
   const CONNECTOR = ['x', 'y', 'fromX', 'fromY', 'toX', 'toY', 'fromId', 'toId', 'fromSide', 'toSide', 'route', 'stroke', 'strokeWidth', 'dash', 'arrowEnd', 'arrowStart', 'visible', 'locked', 'routeBias', 'routePoints', 'curveControls', 'curveControlVersion', 'arrowStartStyle', 'arrowEndStyle', 'arrowWidth', 'arrowLength'];
   const CANVAS = ['width', 'height', 'bg', 'grid', 'gridSize', 'snap', 'theme'];
   const BOOL = ['visible', 'locked', 'dash', 'shadow', 'token3d', 'arrowEnd', 'arrowStart', 'grid', 'snap', 'italic', 'displayMode', 'flipX', 'flipY'];
-  const NUMBERS = {x:[-100000,100000],y:[-100000,100000],w:[1,20000],h:[1,20000],rotation:[-360,360],opacity:[0,1],fontSize:[8,200],fontWeight:[100,900,true],strokeWidth:[0,30],radius:[0,10000],padding:[0,1000],textOffsetX:[-20000,20000],textOffsetY:[-20000,20000],fromX:[-100000,100000],fromY:[-100000,100000],toX:[-100000,100000],toY:[-100000,100000],rows:[1,100,true],cols:[1,100,true],depthCount:[1,20,true],cellW:[4,200],cellH:[4,200],gapX:[0,200],gapY:[0,200],extrude:[0,200],stackX:[0,200],stackY:[0,200],width:[200,6000],height:[200,6000],gridSize:[5,100,true],theme:[0,119,true],cellColorIndex:[0,9999,true],gradientEditLayer:[0,19,true],curveControlVersion:[2,2,true],colorTolerance:[0,255,true],arrowWidth:[4,100],arrowLength:[4,100]};
+  const NUMBERS = {x:[-100000,100000],y:[-100000,100000],w:[1,20000],h:[1,20000],rotation:[-360,360],opacity:[0,1],fontSize:[8,200],fontWeight:[100,900,true],strokeWidth:[0,Infinity],radius:[0,10000],padding:[0,1000],textOffsetX:[-20000,20000],textOffsetY:[-20000,20000],fromX:[-100000,100000],fromY:[-100000,100000],toX:[-100000,100000],toY:[-100000,100000],rows:[1,100,true],cols:[1,100,true],depthCount:[1,20,true],cellW:[4,200],cellH:[4,200],gapX:[0,200],gapY:[0,200],extrude:[0,200],stackX:[0,200],stackY:[0,200],width:[200,6000],height:[200,6000],gridSize:[5,100,true],theme:[0,119,true],cellColorIndex:[0,9999,true],gradientEditLayer:[0,19,true],curveControlVersion:[2,2,true],colorTolerance:[0,255,true],arrowWidth:[4,100],arrowLength:[4,100]};
   const ENUMS = {shapeKind:SHAPES,align:['left','center','right'],vAlign:['top','center','bottom'],route:['straight','orthogonal','curve'],fromSide:['left','right','top','bottom'],toSide:['left','right','top','bottom'],fit:['cover','contain'],colorMode:['solid','cells','gradient'],routeBias:['horizontal','vertical'],arrowStartStyle:['none','triangle','stealth','open','diamond','circle'],arrowEndStyle:['none','triangle','stealth','open','diamond','circle']};
   const fail = message => { throw new Error('AI 编辑无效：' + message); };
   function record(value, label) {
@@ -43,7 +43,7 @@
       else if (key==='transparentColor') { if(v!==null)color(v,'transparentColor',true); }
       else if (key==='type') { if (!TYPES.includes(v)) fail('不支持新增类型'); }
       else if (BOOL.includes(key)) { if (typeof v!=='boolean') fail(key+' 必须是布尔值（true 或 false，不带引号）'); }
-      else if (NUMBERS[key]) { const [min,max,integer]=NUMBERS[key]; if (typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isInteger(v))) fail(key+' 数值超出范围（必须为 '+min+'～'+max+' 的'+(integer?'整数':'有限数值')+'，不带引号或单位）'); }
+      else if (NUMBERS[key]) { const [min,max,integer]=NUMBERS[key]; if (typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isInteger(v))) fail(key+' 数值超出范围（必须为 '+(Number.isFinite(max)?min+'～'+max:'不小于 '+min)+' 的'+(integer?'整数':'有限数值')+'，不带引号或单位）'); }
       else if (ENUMS[key]) { if (!ENUMS[key].includes(v)) fail(key+' 枚举无效'); }
       else if (['fill','stroke','textColor','bg'].includes(key)) color(v,key);
       else if (key==='fontFamily') { if (typeof v!=='string'||! /^[\p{L}\p{N} _-]{1,80}$/u.test(v)) fail('字体名称不安全'); }
@@ -233,7 +233,7 @@
     const cornerSchema=object(Object.fromEntries(['tl','tr','bl','br'].map(k=>[k,hex])));
     const fields={id:identifier,type:{type:'string',enum:TYPES.slice()}};
     BOOL.forEach(k=>fields[k]={type:'boolean'});
-    Object.entries(NUMBERS).forEach(([k,[min,max,integer]])=>fields[k]={type:integer?'integer':'number',minimum:min,maximum:max});
+    Object.entries(NUMBERS).forEach(([k,[min,max,integer]])=>fields[k]={type:integer?'integer':'number',minimum:min,...(Number.isFinite(max)?{maximum:max}:{})});
     Object.entries(ENUMS).forEach(([k,values])=>fields[k]={type:'string',enum:values.slice()});
     ['fill','stroke','textColor','bg'].forEach(k=>fields[k]={type:'string',pattern:'^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|transparent)$'});
     fields.fontFamily={type:'string',minLength:1,maxLength:80,description:'只能包含字母、数字、空格、下划线、横线；默认 HarmonyOS Sans SC'};

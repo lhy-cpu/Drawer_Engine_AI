@@ -149,3 +149,13 @@ test('image transparent color adds and updates without replacing source, and inv
   }
   for(const type of ['basicShape','text','note','token','tokenGrid','formula','connector'])for(const field of ['transparentColor','colorTolerance'])assert.throws(()=>apply(fresh(),[add('other',type,{[field]:field==='transparentColor'?null:24})]),/未知字段/);
 });
+
+test('connector line widths have no fixed upper limit but remain finite nonnegative numbers',()=>{
+  for(const strokeWidth of [0,30,64,120,1000]){
+    const p=apply(fresh(),[add('line','connector',{strokeWidth})]);assert.equal(p.elements[0].strokeWidth,strokeWidth);
+    const q=apply(p,[{op:'update',id:'line',changes:{strokeWidth:strokeWidth+50}}]);assert.equal(q.elements[0].strokeWidth,strokeWidth+50);
+  }
+  for(const strokeWidth of [-1,NaN,Infinity,'64'])assert.throws(()=>apply(fresh(),[add('line','connector',{strokeWidth})]),/数值超出范围/);
+  const schema=globalThis.FlowSketchAIEngine.contract().fields.strokeWidth;
+  assert.equal(schema.minimum,0);assert.equal(Object.hasOwn(schema,'maximum'),false);
+});
