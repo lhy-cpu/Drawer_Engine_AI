@@ -2,9 +2,23 @@
 
 English | [简体中文](README.md)
 
-FlowSketch is an installation-free browser editor for flowcharts and publication figures. It is designed for flow diagrams, model architecture figures, token matrices, annotated diagrams, and technical illustrations containing images. Projects are stored in a human-readable JSON format.
+FlowSketch is a browser editor for flowcharts and publication figures, including model architecture diagrams, token matrices, and technical illustrations containing images. Projects use a human-readable JSON format.
 
-![Example model architecture diagram supported by FlowSketch](assets/readme-example.png)
+Built with HTML, CSS, and JavaScript, the project has no build step or bundled backend. Drawing, file management, and export run in the browser, with scripts, styles, and fonts included in the repository. The optional AI assistant sends conversation and canvas context directly to a user-configured API; see [Data and Privacy](#data-and-privacy) for the complete data flow.
+
+## Try Online
+
+Try FlowSketch at any of these addresses:
+
+- [draw.lhye.work](https://draw.lhye.work/)
+- [github.lhye.work/draw](http://github.lhye.work/draw)
+- [lhy-cpu.github.io/draw](https://lhy-cpu.github.io/draw/)
+
+The hosted editor uses local browser storage. See [Data and Privacy](#data-and-privacy) for data sent when using AI.
+
+![Transformer encoder–decoder diagram drawn with FlowSketch](assets/readme-example.png)
+
+This diagram uses a 16:9 canvas and was drawn and exported with the FlowSketch online editor ([actual editor screenshot](assets/readme-editor.jpg)). Drop the [editable Transformer JSON](examples/transformer.json) into the editor to modify it. Architecture concepts follow [Attention Is All You Need](https://arxiv.org/abs/1706.03762); the diagram layout was created for this project.
 
 ## Key Features
 
@@ -17,10 +31,19 @@ FlowSketch is an installation-free browser editor for flowcharts and publication
 - Undo, redo, copy, paste, a canvas context menu, and common keyboard shortcuts
 - Native PPTX, SVG, PNG, and JSON export
 - Multi-file browser storage, drag-and-drop import, and autosave
+- Optional AI assistant with canvas editing, streaming responses, tool calling, and image input
 
 ## Getting Started
 
-The project has no build step. Open `index.html` directly in a modern desktop browser.
+Download the repository, keep `index.html` and `assets/` in their relative locations, and open `index.html` in a modern desktop browser for basic drawing. No npm dependencies are required.
+
+Alternatively, start a local static file server from the project directory (requires Python 3):
+
+```bash
+python3 -m http.server 8765 --bind 127.0.0.1
+```
+
+Visit [http://127.0.0.1:8765](http://127.0.0.1:8765). This server only serves static files; it provides no project upload or AI relay endpoint. A consistent address helps preserve browser storage. When opening files directly, storage, clipboard, and API cross-origin support depend on the browser.
 
 1. Choose a shape, text, formula, connector, token matrix, note, or image from the left sidebar. Use a dashed rectangle when a visible boundary is needed.
 2. Move, resize, or rotate elements on the canvas, then edit dimensions, colors, text, and styles in the right sidebar.
@@ -33,13 +56,15 @@ Projects are automatically saved to IndexedDB in the current browser profile. Cl
 
 ## Browser AI Assistant
 
-Use the top-right **AI** panel to configure an OpenAI-compatible Chat Completions endpoint, key, and model. Settings stay in the current browser; messages and canvas data go directly to the configured API, without passing through the webpage server.
+Use the top-right **AI** panel to configure an OpenAI-compatible Chat Completions endpoint, key, and model. Both JSON and tools modes are supported. Settings stay in the current browser; requests send conversation and canvas data directly to the configured API without a relay through the webpage server.
 
-Enable **Model supports image input** to send a current canvas screenshot at the start of each request (blank canvases use a text description instead) and after each successful edit. The model can inspect alignment, overlaps, text, and connectors, then make further corrections. Both JSON and tools modes support this feedback loop; tools mode also exposes a read-only `view_canvas` tool. Screenshots contain only the canvas, with grids and editing handles hidden, and exclude chat, settings, and keys. They are observations, not image assets added to the drawing.
+Enable **Model supports image input** to attempt a canvas screenshot when sending and after each successful edit. The model can inspect alignment, overlaps, text, and connectors. Screenshots include visible canvas images and text, hide grids and editing handles, and exclude chat, settings, and keys. Blank canvases omit screenshots.
 
-Each user message allows up to four screenshot attempts and eight model calls, sharing the configured total timeout and Stop control. Failed captures and limits are reported without discarding applied edits, which remain undoable. Only the latest canvas screenshot remains in model context; uploaded reference images follow the history window. Screenshots live in page memory and are not separately persisted in browser storage.
+Select elements and use **Send elements to chat** to specify targets. Automatic screenshots use the target bounds with surrounding padding. Reference images, screenshots, and pending attachments support zoom and region cropping; tools mode can inspect regions through `view_canvas` and `view_reference`. Specifying targets does not restrict structural context to those elements: the current canvas structure is still sent.
 
-Click reference images, canvas screenshots, or pending attachments to preview them at fit, original size, or 200%. Use **Select region** to drag a rectangle or enter pixel coordinates, then queue the crop; cropping a pending attachment replaces its original. Select canvas elements and click **Send elements to chat** above the composer, then describe the adjustment. Removable target tags send the actual element IDs and survive canvas deselection. Automatic screenshots use current target bounds with surrounding padding; previous whole-canvas and historical reference pixels are omitted, while structure and trusted asset IDs remain available. Tools can inspect canvas pixels via `view_canvas({region:{x,y,w,h}})` or source-reference pixels via `view_reference({assetId,region})`; omit region for a full image. Region offsets and dimensions accompany every crop. Visual verification applies only to the actual region shown. A persistent animated status shows thinking, drawing, and refinement until the request ends.
+AI edits validate fields, references, and drawing budgets, and support undo/redo. Manual edits or file changes prevent stale replies from overwriting the new state. Each message allows up to eight model calls and four screenshot attempts, sharing the configured total timeout and Stop control. Conversation and screenshots stay in page memory and disappear on refresh. See [AI.md](AI.md) for settings, image limits, region coordinates, and API requirements (Chinese).
+
+The API must allow the page origin and the `Content-Type` and `Authorization` headers through CORS. Browsers may also block plain HTTP endpoints from HTTPS pages. No API key or model service is included; configure your own endpoint.
 
 ## Formula Editing
 
@@ -88,14 +113,50 @@ Importing JSON creates a new file. Clicking **“应用编辑内容” (Apply ed
 
 ## Data and Privacy
 
-- The editor requires no server. Project data remains in the local browser by default.
-- Images are stored in project JSON as Data URLs, so projects containing images can become large.
-- Previewing a remote project or using an external image URL may still cause the browser to access that address.
-- Local file libraries are separate across browsers, browser profiles, and page origins.
+**A frontend-only architecture means there is no application backend in this project; it does not mean every usage scenario is free of network requests.** The current code has no project upload, cloud synchronization, login, analytics, or telemetry endpoint. Ordinary drawing does not actively upload projects or API settings to the webpage hosting server.
 
-## AI assistant
+| Scenario | Data flow |
+| --- | --- |
+| Drawing, importing local JSON/ZIP/images, autosave | Processed in the browser; projects, images, and file-library settings are stored locally in IndexedDB |
+| JSON/ZIP/SVG/PNG/PPTX export | Generated and downloaded in the browser, without a server-side conversion endpoint |
+| AI settings | API URL, key, model, and options are stored in the current origin's `localStorage`, outside exported project files |
+| Sending an AI message | Browser POST to the configured API with conversation history, current canvas structure (project name, text, element properties, groups, selection, etc.), model, and tool definitions in tools mode; a supplied key is sent as an `Authorization: Bearer …` header |
+| AI image input | When enabled, reference attachments and canvas or region screenshots go to the same API. Screenshots include existing images visible in that region. Original image `src` and image-pooling data are excluded from structural context |
+| Loading a project through `?project=…` | Requests the specified project address on page initialization; a remote server may record access metadata |
+| External image references in imported content | Ordinary image elements accept embedded Data URLs or safe `assets/` paths. A token matrix's `colorImage` may retain a remote URL, which is requested when showing its thumbnail or resampling the image |
+| Visiting a hosted editor | Browser requests the site's HTML, scripts, styles, and fonts; the hosting platform may keep ordinary access logs |
 
-Click **AI** in the upper right to configure an OpenAI-compatible Chat Completions endpoint, API key, and model ID. Chat can edit the active canvas with undo support, streaming replies, optional tool calling, and image input when enabled for a vision-capable model. Configuration stays in browser local storage; requests go directly to the configured API. The existing IndexedDB file library saves canvas edits. Switching files cancels pending AI requests, and preview pages remain read-only. See [AI.md](AI.md) for configuration and validation details (Chinese).
+AI requests omit browser cookies and the Referer header, and reject HTTP redirects. Data is still processed by the configured API operator; transport protection depends on whether the endpoint uses HTTPS. Keys are not encrypted in local storage and can be removed with the AI panel's clear-configuration button. Scripts on the same origin can access that storage.
+
+For offline use, keep a local copy, do not send AI messages or load remote projects through `?project=…`, and ensure imported image and image-pooling sources use embedded Data URLs. Runtime dependencies are bundled, the formula component uses local fonts, and keypress sounds are disabled. Local libraries are separate across browsers, profiles, domains, and ports. Clearing site data removes local projects and settings. Embedded Data URL images increase JSON file size.
+
+The main implementations are [index.html](index.html) (file library, project URL loading, and export), [ai.js](assets/js/ai.js) (settings and conversation), [ai-client.js](assets/js/ai-client.js) (direct API requests), and [ai-engine.js](assets/js/ai-engine.js) (canvas context and edit validation). These statements describe the repository code; analytics scripts, proxies, or services added by deployers require their own disclosure.
+
+## Static Deployment
+
+Deploy to GitHub Pages or another static hosting service, or serve the files directly with Nginx or similar software. Preserve the directory structure, include at least `index.html` and the complete `assets/` directory, and retain licenses and third-party notices. No Node.js server, database, or server environment variables are required. Users enter API keys in their own browsers.
+
+Update the entry page and resources together. Resource version parameters are in `index.html`; the entry HTML should revalidate its cache. Do not embed personal API keys in HTML, scripts, or the repository.
+
+## Development and Testing
+
+```text
+index.html           Editor entry, canvas interaction, file library, import/export
+assets/js/           AI assistant, image editing, canvas capture, connector drawing
+assets/css/          AI and image editor styles
+assets/vendor/       Bundled libraries, fonts, and PPTX export code
+tests/               Node.js automated tests
+draw.md / draw.en.md Project JSON format and generation guide
+AI.md                AI setup, interaction, and troubleshooting (Chinese)
+```
+
+Development tests use Node.js and its built-in test runner. No npm dependencies are required:
+
+```bash
+node --test tests/*.test.cjs
+```
+
+Tests cover AI request protocols and authentication boundaries, edit validation, cross-file protection, image processing, region captures, and connector/PPTX geometry. API requests use mocks and need no real key. These tests do not certify real provider endpoints or every browser environment. Run relevant tests and check affected browser interactions before contributing changes.
 
 ## License
 

@@ -31,6 +31,10 @@ The complete agreement is preserved at
 assets/vendor/harmonyos-sans/LICENSE.txt. The font is not sold or distributed
 as a stand-alone product.
 
-assets/readme-example.png was copied from the sample material supplied with
-this repository for documentation of the diagram types targeted by FlowSketch.
-That material retains any rights that apply to its original source.
+examples/transformer.json is an original editable FlowSketch diagram created
+for this project's documentation. assets/readme-example.png was rendered and
+exported from that project using the FlowSketch editor at https://draw.lhye.work/.
+assets/readme-editor.jpg is an actual screenshot of the same diagram being
+edited in FlowSketch. These documentation assets are distributed under the
+project's GNU General Public License version 3. Transformer architecture concepts
+follow Vaswani et al., "Attention Is All You Need" (2017), https://arxiv.org/abs/1706.03762.
