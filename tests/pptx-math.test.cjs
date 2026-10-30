@@ -70,11 +70,17 @@ test('formula helper uses the current canvas MathML, preserves geometry and mark
   nodes.pop();const missing=context.pptxFormulaItem(formula,'media-1');assert.equal(missing.type,'image');assert.equal(missing.formulaFallback,true);
   delete context.window.FlowSketchPptxMath;assert.equal(context.pptxFormulaItem(formula,'media-1').type,'image');
 });
-async function exportFiles(items){
+async function exportFiles(items,groups=[]){
   const media=[{key:'formula-1',file:'formula1.png',ext:'png',mime:'image/png',bytes:Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64'))}];
-  return fflate.unzipSync(await window.FlowSketchPptx.generate({width:800,height:600,items,media}));
+  return fflate.unzipSync(await window.FlowSketchPptx.generate({width:800,height:600,items,media,groups}));
 }
 const formulaItem=()=>({type:'formula',mediaKey:'formula-1',name:'Formula x < y & z',omml:convert(String.raw`\frac{x}{y}`),fontSize:32,x:40,y:60,w:250,h:120,rotation:20,opacity:.5});
+test('native groups retain Office Math and its compatibility image with slide-level media relationships',async()=>{
+  const files=await exportFiles([{...formulaItem(),sourceId:'equation'},{type:'text',sourceId:'label',text:'Grouped label',x:300,y:60,w:150,h:80}],[{id:'math-group',name:'Math group',memberIds:['equation','label']}]);
+  const slide=fflate.strFromU8(files['ppt/slides/slide1.xml']),group=slide.match(/<p:grpSp>[\s\S]*?<\/p:grpSp>/)[0];
+  assert.match(group,/<a14:m><m:oMathPara/);assert.match(group,/<mc:Fallback><p:pic>/);assert.match(group,/Grouped label/);
+  assert.ok(files['ppt/media/formula1.png']);assert.match(fflate.strFromU8(files['ppt/slides/_rels/slide1.xml.rels']),/Target="..\/media\/formula1.png"/);
+});
 test('PPTX package stores native math and a PNG in mutually exclusive compatibility branches',async()=>{
   const files=await exportFiles([formulaItem()]),slide=fflate.strFromU8(files['ppt/slides/slide1.xml']),rels=fflate.strFromU8(files['ppt/slides/_rels/slide1.xml.rels']);
   assert.match(slide,/<mc:AlternateContent xmlns:mc="http:\/\/schemas.openxmlformats.org\/markup-compatibility\/2006">/);
@@ -93,7 +99,7 @@ test('unsupported formulas retain the existing image path and mixed layers retai
 });
 test('export page loads the converter before the exporter and reports formula fallback counts',()=>{
   assert.ok(html.indexOf('assets/js/pptx-math.js')<html.indexOf('assets/vendor/flowsketch-pptx.js'));
-  assert.match(html,/items\.push\(pptxFormulaItem\(e,key\)\)/);assert.match(html,/scene\.items\.filter\(item=>item\.formulaFallback\)/);
+  assert.match(html,/append\(pptxFormulaItem\(e,key\)\)/);assert.match(html,/scene\.items\.filter\(item=>item\.formulaFallback\)/);
 });
 test('importable trial contains seven convertible formulas and one deliberate image fallback',()=>{
   const sample=require('../examples/native-math.json'),formulas=sample.elements.filter(item=>item.type==='formula');
@@ -127,4 +133,21 @@ test('actual export action waits for fonts, downloads PPTX and reports image fal
 test('a formula without native content still exports its PNG rather than an empty math shape',async()=>{
   const files=await exportFiles([{...formulaItem(),omml:null}]),slide=fflate.strFromU8(files['ppt/slides/slide1.xml']);
   assert.match(slide,/<p:pic>/);assert.doesNotMatch(slide,/<a14:m>|<mc:AlternateContent/);assert.ok(files['ppt/media/formula1.png']);
+});
+test('conflicting groups pause export until a mode is selected, retain the captured filename and report the chosen tradeoff',async()=>{
+  for(const mode of ['merge-groups','preserve-groups']){
+    const downloads=[],messages=[],scene={name:'Captured',items:[]},project={name:'Before'},exporter={groupLayerMerges:()=>1,generate:async actual=>{assert.equal(actual.groupMode,mode);return new Uint8Array([1])}};let choice;
+    const context={window:{FlowSketchPptx:exporter,fflate},FlowSketchPptx:exporter,document:{},closeModal(){},toast:message=>messages.push(message),pptxScene:async()=>scene,choosePptxGroupExport:(count,finish)=>{assert.equal(count,1);choice=finish},download:(...args)=>downloads.push(args),safeName:name=>name,project,console};
+    vm.runInNewContext(html.split('\n').find(line=>line.startsWith('  async function exportPPTX(')),context);
+    await context.exportPPTX();assert.equal(downloads.length,0);project.name='Changed';await choice(mode);assert.equal(downloads.length,1);assert.equal(downloads[0][0],'Captured.pptx');assert.match(messages.at(-1),mode==='merge-groups'?/保留层级/:/遮挡顺序可能变化/);
+  }
+});
+test('group conflict dialog offers both modes plus cancel and ignores repeated selection',()=>{
+  for(const selector of ['#pptxMergeGroups','#pptxKeepGroups','#pptxGroupCancel']){
+    const buttons={},choices=[],closed=[],dialogs=[];
+    const context={$:key=>buttons[key]||(buttons[key]={}),modal:(...args)=>dialogs.push(args),closeModal:()=>closed.push(true)};
+    vm.runInNewContext(html.slice(html.indexOf('  function choosePptxGroupExport('),html.indexOf('  async function exportPPTX(')),context);
+    context.choosePptxGroupExport(2,mode=>choices.push(mode));assert.match(dialogs[0][1],/夹在中间的对象/);
+    buttons[selector].onclick();if(selector==='#pptxGroupCancel')assert.equal(choices.length,0);else{buttons[selector].onclick();assert.deepEqual(choices,[selector==='#pptxMergeGroups'?'merge-groups':'preserve-groups'])}assert.equal(closed.length,1);
+  }
 });

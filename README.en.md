@@ -50,11 +50,36 @@ Visit [http://127.0.0.1:8765](http://127.0.0.1:8765). This server only serves st
 3. Drag a connector endpoint to reveal the four-way shape anchors. Add detours and drag green segment handles on orthogonal routes, or drag the orange handles on curves.
 4. Use **“导出” (Export)** in the top bar to generate native PPTX, SVG, or PNG. Use **JSON** to inspect or download the current project data.
 
-PPTX export preserves the custom canvas size and layer order. Basic shapes, text, token cells, straight/orthogonal segments, and curves remain editable PowerPoint shapes; images use picture objects. Experimental native Office Math (OMML) export supports common fractions, scripts, roots, sums/integrals, matrices, cases, and selected accents and limits, with transparent PNG compatibility fallbacks. Unsupported formulas remain whole images, and the export notification reports their count rather than silently dropping unsupported structure. Native equations use Cambria Math, so typography, spacing, and wrapping may differ from the browser. Native/fallback behavior must be verified separately in PowerPoint, WPS, Keynote, and other viewers. PowerPoint has no equivalent native model for four-corner gradients, so those shapes use their center interpolated color.
-
-Import the [native formula export trial](examples/native-math.json), then export PPTX to check editability. It contains 7 formulas expected to take the native equation path and 1 cancellation formula expected to remain an image; offline conversion and package tests do not verify real browser export or PowerPoint editability.
-
 Projects are automatically saved to IndexedDB in the current browser profile. Clearing browser site data removes these local files, so export backups of important work regularly.
+
+## File Export and PPTX Compatibility
+
+Project backups and rendered deliverables use different entry points, as listed below. AI composition and project JSON fields are specified in [draw.en.md](draw.en.md) ([Chinese](draw.md)):
+
+| Entry / format | Purpose |
+| --- | --- |
+| JSON → Download JSON, or export one selected file | Complete project data, including hidden objects and groups, for reimport and continued editing. |
+| Export multiple selected files as ZIP | One JSON per project, restorable by drag-and-drop; not batch PPTX/SVG/PNG output. |
+| Top-bar Export → SVG / PNG / native PPTX | Visible content of the current project. PNG's longest side is capped at 4096 pixels. These outputs do not replace JSON backups. |
+
+PPTX preserves canvas dimensions and exports current geometry to a single slide; pixel-identical rendering is not guaranteed:
+
+- **Native primitives**: basic shapes, text, token cells and 3D faces, and straight/orthogonal/curved paths remain editable; images use picture objects. Connector geometry survives, but browser endpoint-binding behavior is not guaranteed in PowerPoint.
+- **Corners and shadows**: rectangular corner radii and ordinary shape outer shadows use native effects.
+- **Four-corner gradients**: PNG texture fills clipped to native outlines replace the old center solid color. Geometry, text, and outlines stay editable, but the texture cannot be edited as four individual gradient corners.
+- **Formulas**: supported structures become native Office Math (OMML) with transparent PNG compatibility fallbacks. Unsupported formulas remain whole pictures and are counted in the export notification. Native equations use Cambria Math, so typography, spacing, and wrapping can differ.
+- **Image processing**: crop, flip, fit, and color-key transparency are baked into PNG pictures that can move, rotate, and resize; the original crop cannot be recovered from the PPTX.
+- **Groups**: original groups become native PowerPoint groups, including expanded token primitives, without hidden members or reapplying automatic stacking.
+
+If members are interleaved with outside objects, export pauses for three choices:
+
+1. **Merge groups, preserve layers**: merge interleaved groups and intervening objects, possibly including connectors, into larger groups while preserving original stacking order and changing group boundaries.
+2. **Preserve groups, allow layer changes**: keep original membership and place each group at its uppermost member layer, potentially changing occlusion.
+3. **Cancel export**: download nothing and optionally adjust canvas layers first.
+
+The choice affects only that PPTX, not the canvas. Without interleaving conflicts, original groups and order are retained directly.
+
+Import the [native formula example](examples/native-math.json) to inspect seven expected native equations and one picture fallback. On 2026-10-30, local browser exports were checked in macOS PowerPoint for opening, equation editing state, corners/gradients/shadows, pictures/tokens, native groups, and both conflict-choice branches. This does not prove pixel fidelity for every parameter combination or replace separate Windows PowerPoint, WPS, and Keynote acceptance. Automated tests alone do not prove desktop editability.
 
 ## Browser AI Assistant
 
@@ -76,13 +101,13 @@ Select local relay mode, keep your original API URL/key/model, and enter the loo
 
 ## Formula Editing
 
-Choose **Formula** in the left sidebar to insert a LaTeX formula. The editor provides two workflows:
+Choose **Formula** in the left sidebar to insert a LaTeX formula. The editor provides these workflows:
 
 - **Visual editing**: work directly in the typeset formula, click a dotted placeholder to fill it, and insert fractions, roots, scripts, integrals, matrices, cases, or other structures at any placeholder or cursor position. Structures can be nested without limit.
 - **Categorized formula library**: browse structures, basic math, Greek letters, relations, operators, sets and logic, arrows, and calculus, or open the complete numeric, symbol, alphabetic, and Greek virtual keyboard.
 - **LaTeX source**: type any KaTeX-supported LaTeX directly and switch back and forth with the visual editor.
 
-The editor keeps LaTeX synchronized and reports syntax errors. Double-click a formula on the canvas to edit it again, or use the properties panel to change its size, color, rotation, and display mode. Formula data is stored in project JSON and participates in SVG, PNG, and clipboard-image export.
+The editor keeps LaTeX synchronized and reports syntax errors. Double-click a formula on the canvas to edit it again, or use the properties panel to change its size, color, rotation, and display mode. Formula data is stored in project JSON and participates in SVG, PNG, and clipboard-image export; PPTX follows the native-equation/picture fallback rules above.
 
 ## Files and Import
 
@@ -166,7 +191,7 @@ Development tests use Node.js and its built-in test runner. No npm dependencies 
 node --test tests/*.test.cjs
 ```
 
-Tests cover AI request protocols and authentication boundaries, edit validation, cross-file protection, image processing, region captures, and connector/PPTX geometry. API requests use mocks and need no real key. These tests do not certify real provider endpoints or every browser environment. Run relevant tests and check affected browser interactions before contributing changes.
+Tests cover AI request protocols and authentication boundaries, edit validation, cross-file protection, image processing, region captures, and connector/PPTX geometry, package structure, corners/shadows/gradient textures, native equations, expanded group membership, conflict choices, and cancellation. API requests use mocks and need no real key. These tests do not certify real provider endpoints or every browser environment. Run relevant tests and check affected browser interactions before contributing changes.
 
 ## License
 
