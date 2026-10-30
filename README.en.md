@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 FlowSketch is a browser editor for flowcharts and publication figures, including model architecture diagrams, token matrices, and technical illustrations containing images. Projects use a human-readable JSON format.
 
-Built with HTML, CSS, and JavaScript, the project has no build step or bundled backend. Drawing, file management, and export run in the browser, with scripts, styles, and fonts included in the repository. The optional AI assistant sends conversation and canvas context directly to a user-configured API; see [Data and Privacy](#data-and-privacy) for the complete data flow.
+Built with HTML, CSS, and JavaScript, the project has no build step or required application backend. Drawing, file management, and export run in the browser, with scripts, styles, and fonts included in the repository. The optional AI assistant sends conversation and canvas context directly to a user-configured API by default, with an optional local relay; see [Data and Privacy](#data-and-privacy) for the complete data flow.
 
 ## Try Online
 
@@ -50,13 +50,15 @@ Visit [http://127.0.0.1:8765](http://127.0.0.1:8765). This server only serves st
 3. Drag a connector endpoint to reveal the four-way shape anchors. Add detours and drag green segment handles on orthogonal routes, or drag the orange handles on curves.
 4. Use **“导出” (Export)** in the top bar to generate native PPTX, SVG, or PNG. Use **JSON** to inspect or download the current project data.
 
-PPTX export preserves the custom canvas size and layer order. Basic shapes, text, token cells, straight/orthogonal segments, and curves remain editable PowerPoint shapes; images use picture objects, while LaTeX formulas use transparent PNGs to preserve their appearance. PowerPoint has no equivalent native model for four-corner gradients, so those shapes use their center interpolated color.
+PPTX export preserves the custom canvas size and layer order. Basic shapes, text, token cells, straight/orthogonal segments, and curves remain editable PowerPoint shapes; images use picture objects. Experimental native Office Math (OMML) export supports common fractions, scripts, roots, sums/integrals, matrices, cases, and selected accents and limits, with transparent PNG compatibility fallbacks. Unsupported formulas remain whole images, and the export notification reports their count rather than silently dropping unsupported structure. Native equations use Cambria Math, so typography, spacing, and wrapping may differ from the browser. Native/fallback behavior must be verified separately in PowerPoint, WPS, Keynote, and other viewers. PowerPoint has no equivalent native model for four-corner gradients, so those shapes use their center interpolated color.
+
+Import the [native formula export trial](examples/native-math.json), then export PPTX to check editability. It contains 7 formulas expected to take the native equation path and 1 cancellation formula expected to remain an image; offline conversion and package tests do not verify real browser export or PowerPoint editability.
 
 Projects are automatically saved to IndexedDB in the current browser profile. Clearing browser site data removes these local files, so export backups of important work regularly.
 
 ## Browser AI Assistant
 
-Use the top-right **AI** panel to configure an OpenAI-compatible Chat Completions endpoint, key, and model. Both JSON and tools modes are supported. Settings stay in the current browser; requests send conversation and canvas data directly to the configured API without a relay through the webpage server.
+Use the top-right **AI** panel to configure an OpenAI-compatible Chat Completions endpoint, key, and model. Both JSON and tools modes are supported. Settings stay in the current browser; requests use the configured API directly by default, or your local relay when selected. Neither route relays through the webpage hosting server.
 
 Enable **Model supports image input** to attempt a canvas screenshot when sending and after each successful edit. The model can inspect alignment, overlaps, text, and connectors. Screenshots include visible canvas images and text, hide grids and editing handles, and exclude chat, settings, and keys. Blank canvases omit screenshots.
 
@@ -64,7 +66,13 @@ Select elements and use **Send elements to chat** to specify targets. Automatic 
 
 AI edits validate fields, references, and drawing budgets, and support undo/redo. Manual edits or file changes prevent stale replies from overwriting the new state. Each message allows up to eight model calls and four screenshot attempts, sharing the configured total timeout and Stop control. Conversation and screenshots stay in page memory and disappear on refresh. See [AI.md](AI.md) for settings, image limits, region coordinates, and API requirements (Chinese).
 
-The API must allow the page origin and the `Content-Type` and `Authorization` headers through CORS. Browsers may also block plain HTTP endpoints from HTTPS pages. No API key or model service is included; configure your own endpoint.
+For direct cross-origin connections, the API must allow the page origin and `Content-Type` / `Authorization` headers through CORS. HTTPS pages may also block ordinary non-loopback HTTP endpoints. After a network/CORS failure, click **“使用本地转发” (Use local relay)**, or open download help from AI settings. The centered help dialog automatically selects the current Windows/macOS/Linux tab and lets you switch manually. Download **one standalone service file** for your existing environment: [server.ps1](tools/local-relay/server.ps1) for built-in Windows PowerShell/.NET, [server.cjs](tools/local-relay/server.cjs) for Node.js on macOS/Linux or other systems, or [server.py](tools/local-relay/server.py) if you have Python 3 instead. Each file runs independently, without a ZIP, launcher, or automatic installation.
+
+Run the command shown in the dialog from the download directory, using the exact current page origin (`null` for `file://`). Examples: Windows `powershell -NoProfile -ExecutionPolicy Bypass -File .\server.ps1 --origin https://draw.lhye.work`; Node.js `node ./server.cjs --origin https://draw.lhye.work`; Python `python3 ./server.py --origin https://draw.lhye.work` (or `py -3` on Windows). Replace the example origin with yours. The service generates its own startup token.
+
+If Python 3 is already available, expand the no-download option to inspect and copy the full service source with its startup text. Paste it into the matching macOS/Linux shell or Windows PowerShell; no file download or save is needed. Expanding the Python no-download section only reads `server.py` as text from the current hosting origin; the webpage does not execute it. If a `file://` page cannot read that text, the dialog offers standalone downloads instead.
+
+Select local relay mode, keep your original API URL/key/model, and enter the loopback URL (default `http://127.0.0.1:18765`) and startup token printed in the terminal. **Test local connection** only checks `GET /health`. The helper binds to loopback and checks the exact origin and token. The token stays in page memory and must be re-entered after refresh. HTTPS pages can contact HTTP loopback endpoints; allow the browser's local-network/loopback permission prompt. Browser or organization policies and CSP `connect-src` can still block access; ordinary public HTTP pages may lack the required secure context, so use HTTPS or a local static page. Do not disable browser security or install certificates. See [Chrome's official guidance](https://developer.chrome.com/docs/modern-web-guidance/guides/security/local-network-access) and [AI.md](AI.md#可选本地转发). No API key or model service is included.
 
 ## Formula Editing
 
@@ -113,28 +121,29 @@ Importing JSON creates a new file. Clicking **“应用编辑内容” (Apply ed
 
 ## Data and Privacy
 
-**A frontend-only architecture means there is no application backend in this project; it does not mean every usage scenario is free of network requests.** The current code has no project upload, cloud synchronization, login, analytics, or telemetry endpoint. Ordinary drawing does not actively upload projects or API settings to the webpage hosting server.
+**Drawing and static deployment require no application backend; the optional relay runs on the user’s computer.** The current code has no project upload, cloud synchronization, login, analytics, or telemetry endpoint. Ordinary drawing does not actively upload projects or API settings to the webpage hosting server.
 
 | Scenario | Data flow |
 | --- | --- |
 | Drawing, importing local JSON/ZIP/images, autosave | Processed in the browser; projects, images, and file-library settings are stored locally in IndexedDB |
 | JSON/ZIP/SVG/PNG/PPTX export | Generated and downloaded in the browser, without a server-side conversion endpoint |
-| AI settings | API URL, key, model, and options are stored in the current origin's `localStorage`, outside exported project files |
-| Sending an AI message | Browser POST to the configured API with conversation history, current canvas structure (project name, text, element properties, groups, selection, etc.), model, and tool definitions in tools mode; a supplied key is sent as an `Authorization: Bearer …` header |
-| AI image input | When enabled, reference attachments and canvas or region screenshots go to the same API. Screenshots include existing images visible in that region. Original image `src` and image-pooling data are excluded from structural context |
+| AI settings | API URL, key, model, connection mode, relay URL, and other options stay in the current origin's `localStorage`; the startup token stays only in page memory. Neither is included in exported projects |
+| Sending an AI message | Direct browser POST by default. In relay mode the request contents, API URL, and key first go to the local helper, which POSTs to the configured API. Requests contain conversation history, current canvas structure (project name, text, element properties, groups, selection, etc.), model, and tool definitions in tools mode; a supplied key is sent as an `Authorization: Bearer …` header |
+| AI image input | When enabled, reference attachments and canvas or region screenshots go to the same API through the selected connection mode. Screenshots include existing images visible in that region. Original image `src` and image-pooling data are excluded from structural context |
 | Loading a project through `?project=…` | Requests the specified project address on page initialization; a remote server may record access metadata |
 | External image references in imported content | Ordinary image elements accept embedded Data URLs or safe `assets/` paths. A token matrix's `colorImage` may retain a remote URL, which is requested when showing its thumbnail or resampling the image |
+| Opening local relay help | Reads plain `server.py` text from the same hosting origin for the no-download instructions; sends no API key, startup token, or conversation to that origin |
 | Visiting a hosted editor | Browser requests the site's HTML, scripts, styles, and fonts; the hosting platform may keep ordinary access logs |
 
-AI requests omit browser cookies and the Referer header, and reject HTTP redirects. Data is still processed by the configured API operator; transport protection depends on whether the endpoint uses HTTPS. Keys are not encrypted in local storage and can be removed with the AI panel's clear-configuration button. Scripts on the same origin can access that storage.
+Both direct requests and the helper’s upstream AI requests omit browser cookies and the Referer header, and reject HTTP redirects. Data is still processed by the configured API operator; transport protection depends on whether the endpoint uses HTTPS. Keys are not encrypted in local storage and can be removed with the AI panel's clear-configuration button. Scripts on the same origin can access that storage.
 
 For offline use, keep a local copy, do not send AI messages or load remote projects through `?project=…`, and ensure imported image and image-pooling sources use embedded Data URLs. Runtime dependencies are bundled, the formula component uses local fonts, and keypress sounds are disabled. Local libraries are separate across browsers, profiles, domains, and ports. Clearing site data removes local projects and settings. Embedded Data URL images increase JSON file size.
 
-The main implementations are [index.html](index.html) (file library, project URL loading, and export), [ai.js](assets/js/ai.js) (settings and conversation), [ai-client.js](assets/js/ai-client.js) (direct API requests), and [ai-engine.js](assets/js/ai-engine.js) (canvas context and edit validation). These statements describe the repository code; analytics scripts, proxies, or services added by deployers require their own disclosure.
+The main implementations are [index.html](index.html) (file library, project URL loading, and export), [ai.js](assets/js/ai.js) (settings and conversation), [ai-client.js](assets/js/ai-client.js) (direct and local relay requests), and [ai-engine.js](assets/js/ai-engine.js) (canvas context and edit validation). These statements describe the repository code; analytics scripts, proxies, or services added by deployers require their own disclosure.
 
 ## Static Deployment
 
-Deploy to GitHub Pages or another static hosting service, or serve the files directly with Nginx or similar software. Preserve the directory structure, include at least `index.html` and the complete `assets/` directory, and retain licenses and third-party notices. No Node.js server, database, or server environment variables are required. Users enter API keys in their own browsers.
+Deploy to GitHub Pages or another static hosting service, or serve the files directly with Nginx or similar software. Preserve the directory structure, include `index.html`, the complete `assets/` directory, and the downloadable `tools/local-relay/server.ps1`, `server.cjs`, and `server.py` files, and retain licenses and third-party notices. The hosting server requires no Node.js service, database, or server environment variables. The optional relay runs on the user’s computer. Users enter API keys in their own browsers.
 
 Update the entry page and resources together. Resource version parameters are in `index.html`; the entry HTML should revalidate its cache. Do not embed personal API keys in HTML, scripts, or the repository.
 
@@ -145,6 +154,7 @@ index.html           Editor entry, canvas interaction, file library, import/expo
 assets/js/           AI assistant, image editing, canvas capture, connector drawing
 assets/css/          AI and image editor styles
 assets/vendor/       Bundled libraries, fonts, and PPTX export code
+tools/               Optional local relay, independently downloadable service files
 tests/               Node.js automated tests
 draw.md / draw.en.md Project JSON format and generation guide
 AI.md                AI setup, interaction, and troubleshooting (Chinese)
