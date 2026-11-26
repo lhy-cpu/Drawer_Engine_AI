@@ -288,3 +288,32 @@ test('zero-length curve lead-ins use the next nonzero tangent for arrow controls
   const from=context.connectorArrowTangent({},'from');assert.ok(Math.abs(from.x+40/Math.hypot(40,100))<1e-10);assert.ok(Math.abs(from.y+100/Math.hypot(40,100))<1e-10);
   const to=context.connectorArrowTangent({},'to');assert.equal(to.x,1);assert.equal(to.y,0);
 });
+function themeHarness(elements,{theme=['#0b2d5c','#165d9c','#e8f1fb','#f69d3c','#ffffff'],bg='#ffffff',selection=null}={}){
+  const toasts=[],context={project:{canvas:{theme:0,bg},elements},themes:[{colors:theme}],toast:m=>toasts.push(m),commit(){},render(){},
+    selectedElements:()=>elements.filter(e=>selection?.includes(e.id)),clamp:(v,a,b)=>Math.max(a,Math.min(b,v))};
+  const start=html.indexOf('  function adjust('),adjustSrc=html.slice(start,html.indexOf('\n',start));
+  const themeStart=html.indexOf('  function themeRGB('),themeEnd=html.indexOf('\n',html.indexOf('  function applyTheme(',themeStart));
+  vm.createContext(context);vm.runInContext(adjustSrc+'\n'+html.slice(themeStart,themeEnd),context);
+  return {apply:scope=>context.applyTheme(scope),toasts};
+}
+const rect=(id,x,y,w,h,extra={})=>({id,type:'basicShape',shapeKind:'rect',x,y,w,h,rotation:0,visible:true,fill:'#000000',stroke:'#000000',textColor:'#000000',...extra});
+test('applying a theme keeps a container rectangle as a neutral group background regardless of layer index',()=>{
+  const panel=rect('panel',0,0,400,300,{dash:true}),inner=rect('inner',40,40,120,60),title={id:'title',type:'text',x:40,y:200,w:200,h:30,visible:true,textColor:'#123456'};
+  const h=themeHarness([panel,inner,title]);h.apply('all');
+  assert.equal(panel.fill,'#ffffff');assert.equal(panel.stroke,'#165d9c');assert.equal(panel.textColor,'#0b2d5c');
+  assert.equal(title.textColor,'#0b2d5c');assert.deepEqual(h.toasts,['主题已应用到全部元素']);
+});
+test('applying a theme picks readable text on strong fills and for free text placed over them',()=>{
+  const strong=rect('strong',0,0,200,80),label={id:'label',type:'text',x:20,y:20,w:160,h:40,visible:true,textColor:'#000000'};
+  const solo=rect('solo',300,0,200,80),plain=rect('plain',600,0,200,80);
+  themeHarness([strong,label,solo,plain,rect('n4',900,0,50,50),rect('n5',1000,0,50,50)]).apply('all');
+  assert.equal(strong.fill,'#165d9c');assert.equal(strong.textColor,'#ffffff');assert.equal(label.textColor,'#ffffff');
+  assert.equal(solo.fill,'#e8f1fb');assert.equal(solo.textColor,'#0b2d5c');
+  const pale=rect('pale',0,0,200,80);themeHarness([pale],{theme:['#3f3f46','#fde68a','#fffbeb','#f59e0b','#ffffff']}).apply('all');
+  assert.equal(pale.fill,'#fde68a');assert.equal(pale.textColor,'#3f3f46');
+});
+test('applying a theme to a selection only recolours the selected elements',()=>{
+  const a=rect('a',0,0,100,50),b=rect('b',200,0,100,50,{fill:'#abcdef'});
+  const h=themeHarness([a,b],{selection:['a']});h.apply('selection');
+  assert.equal(a.fill,'#165d9c');assert.equal(b.fill,'#abcdef');assert.deepEqual(h.toasts,['主题已应用到 1 个所选元素']);
+});
